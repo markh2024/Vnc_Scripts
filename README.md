@@ -1,5 +1,9 @@
 # VNC Setup Manager - Complete Guide & Documentation
 
+<p align ="center ">
+!<img src ="Menu1.png">
+</p>
+
 ## Table of Contents
 1. [Overview](#overview)
 2. [What This Script Does](#what-this-script-does)
@@ -685,6 +689,12 @@ chmod +x ~/vnc-manager.sh
 - Troubleshooting errors
 - Checking connection attempts
 
+
+<p align ="center ">
+!<img src ="Menu11.png">
+</p>
+
+
 #### 11) Show Connection Info
 **What it does:**
 - Displays your IP address
@@ -725,6 +735,11 @@ chmod +x ~/vnc-manager.sh
 ## Connecting from Client
 
 ### Using Remmina (Recommended)
+
+<p align ="center ">
+!<img src ="remmina.png">
+</p>
+
 
 1. **Open Remmina**
    ```bash
@@ -1138,4 +1153,337 @@ sudo firewall-cmd --list-services
 vncpasswd ~/.vnc/passwd
 
 # Start x0vncserver manually
-x0vncserver -display :0 -rfbport 5900 -Passwor
+x0vncserver -display :0 -rfbport 5900 -Password
+```
+
+
+### How to kill VNC processes 
+
+ps aux | grep vnc
+
+### Network Commands
+```bash
+# Check if port is open
+netstat -tulpn | grep 5900
+ss -tulpn | grep 5900
+lsof -i :5900
+
+# Find your IP address
+hostname -I
+ip addr show
+ifconfig
+
+# Test connectivity
+ping [server-ip]
+telnet [server-ip] 5900
+nc -zv [server-ip] 5900
+```
+
+### File Permission Commands
+```bash
+# View permissions
+ls -la ~/.vnc/
+ls -la ~/start-vnc.sh
+
+# Set permissions
+chmod 700 ~/.vnc                # Directory: owner only
+chmod 600 ~/.vnc/passwd         # Password: owner read/write only
+chmod 644 ~/.vnc/config         # Config: owner rw, others read
+chmod +x ~/start-vnc.sh         # Make executable
+
+# Change ownership
+chown username:username ~/.vnc/passwd
+```
+
+---
+
+## Performance Tuning
+
+### Server-Side Optimization
+
+**1. Limit CPU Usage**
+
+Edit `~/start-vnc.sh`:
+```bash
+x0vncserver ... -MaxProcessorUsage 50
+```
+
+**2. Adjust Compression**
+
+In `~/.vnc/config`:
+
+## CompareFB=0      # Disable framebuffer comparison (faster but more bandwidth)
+
+```
+ZlibLevel=6      # Compression level 1-9 (higher = more CPU, less bandwidth)
+```
+
+**3. Reduce Frame Rate**
+```bash
+x0vncserver ... -DeferUpdate 50  # Milliseconds between updates
+```
+
+### Client-Side Optimization
+
+**Remmina Settings:**
+- Color Depth: 256 colors (8 bpp) for slow connections
+- Quality: Poor or Medium
+- Enable compression: ✓
+- Disable wallpaper: ✓ (if supported)
+
+---
+
+## Script Maintenance
+
+### Updating the Script
+
+1. **Backup current version:**
+```bash
+   cp ~/vnc-manager.sh ~/vnc-manager.sh.backup
+```
+
+2. **Edit script:**
+```bash
+   nano ~/vnc-manager.sh
+```
+
+3. **Test changes:**
+```bash
+   bash -n ~/vnc-manager.sh  # Check syntax
+   ~/vnc-manager.sh           # Run normally
+```
+
+### Version Control (Optional)
+
+Track changes with git:
+```bash
+cd ~
+git init vnc-scripts
+cd vnc-scripts
+cp ~/vnc-manager.sh .
+git add vnc-manager.sh
+git commit -m "Initial version"
+```
+
+After changes:
+```bash
+git diff vnc-manager.sh     # See changes
+git add vnc-manager.sh
+git commit -m "Description of changes"
+```
+
+---
+
+## Uninstallation
+
+### Complete Removal
+
+**Using the script:**
+```bash
+~/vnc-manager.sh
+# Select option 13
+# Type: yes
+```
+
+**Manual removal:**
+```bash
+# Stop and disable service
+systemctl --user stop x0vncserver
+systemctl --user disable x0vncserver
+
+# Remove files
+rm -f ~/.config/systemd/user/x0vncserver.service
+rm -f ~/start-vnc.sh
+rm -rf ~/.vnc
+
+# Reload systemd
+systemctl --user daemon-reload
+
+# Disable lingering
+loginctl disable-linger $USER
+
+# Remove TigerVNC package (optional)
+sudo zypper remove tigervnc
+
+# Remove firewall rules (optional)
+sudo firewall-cmd --permanent --remove-port=5900/tcp
+sudo firewall-cmd --reload
+```
+
+---
+
+## Glossary
+
+**ANSI**: American National Standards Institute - defines escape codes for terminal colors
+
+**Bash**: Bourne Again Shell - the default shell on most Linux systems
+
+**Display**: In X11, a connection to an X server, usually numbered (:0, :1, etc.)
+
+**Exit Code**: Number returned by a command (0 = success, non-zero = failure)
+
+**Firewalld**: Dynamic firewall management tool for Linux
+
+**Heredoc**: Here Document - multi-line string in shell scripts
+
+**Lingering**: Systemd feature allowing user services to run when not logged in
+
+**PCI**: Peripheral Component Interconnect - internal computer bus
+
+**Port**: Network endpoint identified by number (5900 for VNC)
+
+**RFB**: Remote Framebuffer Protocol - protocol used by VNC
+
+**Shebang**: First line of script (`#!/bin/bash`) indicating interpreter
+
+**Stderr**: Standard Error - file descriptor 2 for error messages
+
+**Stdin**: Standard Input - file descriptor 0 for input
+
+**Stdout**: Standard Output - file descriptor 1 for normal output
+
+**Systemd**: Init system and service manager for Linux
+
+**VNC**: Virtual Network Computing - remote desktop protocol
+
+**X11**: X Window System version 11 - display server protocol
+
+**XAUTHORITY**: File containing authentication credentials for X11
+
+**Wayland**: Modern display server protocol (VNC doesn't work with this)
+
+---
+
+## Additional Resources
+
+### Official Documentation
+
+- [TigerVNC Website](https://tigervnc.org/)
+- [TigerVNC GitHub](https://github.com/TigerVNC/tigervnc)
+- [RFB Protocol Specification](https://github.com/rfbproto/rfbproto)
+- [Systemd Documentation](https://www.freedesktop.org/wiki/Software/systemd/)
+- [Firewalld Documentation](https://firewalld.org/documentation/)
+
+### Community Resources
+
+- [Arch Wiki - TigerVNC](https://wiki.archlinux.org/title/TigerVNC)
+- [Debian Wiki - VNC](https://wiki.debian.org/VNC)
+- [openSUSE VNC Documentation](https://doc.opensuse.org/)
+
+### Learning Bash
+
+- [Bash Guide for Beginners](https://tldp.org/LDP/Bash-Beginners-Guide/html/)
+- [Advanced Bash-Scripting Guide](https://tldp.org/LDP/abs/html/)
+- [ShellCheck](https://www.shellcheck.net/) - Online bash syntax checker
+
+---
+
+## Changelog
+
+### Version 1.0 (Current)
+- Initial release
+- Auto-detect and install TigerVNC
+- Graphics hardware detection
+- Dynamic XAUTHORITY handling
+- Systemd service setup
+- Firewall configuration
+- Complete uninstall option
+- Menu-driven interface
+
+---
+
+## Credits & License
+
+**Created by:** Community effort
+**Tested on:** openSUSE Tumbleweed with Intel 965Q graphics
+**License:** Free to use, modify, and distribute
+
+**Special thanks to:**
+- TigerVNC developers
+- openSUSE community
+- Everyone who contributed to testing and debugging
+
+---
+
+## Support
+
+### Getting Help
+
+If you encounter issues:
+
+1. **Check the logs:**
+```bash
+   journalctl --user -u x0vncserver -n 100
+```
+
+2. **Verify service status:**
+```bash
+   systemctl --user status x0vncserver
+```
+
+3. **Check network connectivity:**
+```bash
+   netstat -tulpn | grep 5900
+```
+
+4. **Review this documentation** - most issues are covered in Troubleshooting section
+
+### Reporting Issues
+
+When asking for help, provide:
+- Your Linux distribution and version
+- Graphics hardware (`lspci | grep VGA`)
+- Error messages from logs
+- Output of `systemctl --user status x0vncserver`
+- Whether you're using X11 or Wayland (`echo $XDG_SESSION_TYPE`)
+
+---
+
+## Quick Reference Card
+
+### Most Common Commands
+```bash
+# Start VNC Manager
+~/vnc-manager.sh
+
+# Quick Manual Start
+x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no
+
+# Check Status
+systemctl --user status x0vncserver
+
+# View Logs
+journalctl --user -u x0vncserver -f
+
+# Restart Service
+systemctl --user restart x0vncserver
+
+# Find Your IP
+hostname -I
+
+# Check if Port is Open
+netstat -tulpn | grep 5900
+```
+
+### Emergency Recovery
+```bash
+# Kill all VNC processes
+pkill -9 x0vncserver
+
+# Stop systemd socket that might be blocking port
+sudo systemctl stop xvnc.socket
+
+# Start fresh
+systemctl --user restart x0vncserver
+
+# If all else fails, run uninstall then full setup
+~/vnc-manager.sh  # Option 13, then Option 1
+```
+
+---
+
+**End of Documentation**
+
+This comprehensive guide covers everything you need to know about the VNC Setup Manager script, from basic concepts to advanced troubleshooting. Keep it handy for reference!</parameter>
+<parameter name="old_str"># Start x0vncserver manually
+x0vncserver -display :0 -rfbport 5900 -Passwor</parameter>
