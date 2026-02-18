@@ -1,23 +1,32 @@
 # VNC Setup Manager - Complete Guide & Documentation
 
-<p align ="center ">
-!<img src ="Menu1.png">
+<p align="center">
+<img src="Menu1.png">
 </p>
 
 ## Table of Contents
+
 1. [Overview](#overview)
 2. [What This Script Does](#what-this-script-does)
 3. [Understanding VNC Displays](#understanding-vnc-displays)
 4. [Key Concepts Explained](#key-concepts-explained)
-5. [Code Explanations](#code-explanations)
-6. [Installation & Usage](#installation--usage)
-7. [Troubleshooting](#troubleshooting)
+5. [Why the Script Was Redesigned (v2.0)](#why-the-script-was-redesigned)
+6. [Code Explanations](#code-explanations)
+7. [Installation & Usage](#installation--usage)
+8. [Troubleshooting](#troubleshooting)
+9. [Advanced Configuration](#advanced-configuration)
+10. [Files Created by the Script](#files-created-by-the-script)
+11. [Complete Command Reference](#complete-command-reference)
+12. [Frequently Asked Questions](#frequently-asked-questions)
+13. [Performance Tuning](#performance-tuning)
+14. [Glossary](#glossary)
+15. [Changelog](#changelog)
 
 ---
 
 ## Overview
 
-This script automates the setup and management of a VNC (Virtual Network Computing) server on openSUSE Tumbleweed. It allows you to remotely access your Linux desktop from another computer using tools like Remmina.
+This script automates the setup and management of a VNC (Virtual Network Computing) server on openSUSE Tumbleweed. It allows you to remotely access your Linux desktop from another computer using tools like Remmina or any VNC viewer.
 
 ### What is VNC?
 
@@ -26,12 +35,12 @@ VNC (Virtual Network Computing) is a graphical desktop-sharing system that uses 
 ### Why This Script?
 
 Setting up VNC manually is complex and error-prone, especially on modern Linux systems with:
-- Dynamic XAUTHORITY paths
-- Systemd service management
+- Dynamic XAUTHORITY paths managed by SDDM
+- SELinux enforcing mode blocking cross-context file access
 - Firewall configuration
 - Graphics hardware variations
 
-This script handles all of that automatically.
+This script handles all of that automatically using the most reliable approach available for KDE Plasma on openSUSE Tumbleweed — **KDE Autostart**.
 
 ---
 
@@ -41,28 +50,26 @@ This script handles all of that automatically.
 
 1. **Dependency Management**
    - Checks if TigerVNC is installed
-   - Offers to install it automatically
-   - Verifies all required components
+   - Offers to install it automatically via `zypper`
+   - Verifies all required components are present
 
 2. **Graphics Detection**
    - Detects your GPU (Intel, NVIDIA, AMD)
-   - Applies optimized settings for older hardware (like Intel 965Q)
+   - Applies appropriate settings for detected hardware
 
 3. **File Creation**
    - Creates `~/.vnc/` directory with correct permissions (700)
    - Generates password file with correct permissions (600)
-   - Creates configuration files
-   - Generates startup script (`~/start-vnc.sh`)
-   - Creates systemd service file
+   - Creates `~/.vnc/config` configuration file
+   - Creates `~/.config/autostart/x0vncserver.desktop` for KDE autostart
 
 4. **System Configuration**
-   - Configures firewall to allow VNC connections
-   - Sets up systemd service for auto-start on boot
-   - Enables user lingering (service runs even when not logged in)
+   - Configures firewall to allow VNC connections on port 5900
+   - Sets up KDE autostart so VNC launches at every login automatically
 
 5. **Service Management**
-   - Start/Stop/Restart VNC server
-   - Enable/Disable auto-start on boot
+   - Start/Stop/Restart VNC server for the current session
+   - Enable/Disable auto-start at login
    - View status and logs
    - Complete uninstallation
 
@@ -72,7 +79,7 @@ This script handles all of that automatically.
 
 ### Two Approaches to VNC
 
-#### 1. **Virtual Desktop (vncserver)**
+#### 1. Virtual Desktop (vncserver)
 Creates a NEW virtual desktop session separate from your physical display.
 
 ```
@@ -82,17 +89,18 @@ Your Computer:
 ```
 
 **Pros:**
-- Can run different desktop environment
+- Can run a different desktop environment
 - Multiple users can have separate sessions
 - Continues running even if you log out physically
 
 **Cons:**
 - Black screen issues with complex desktop environments
-- Need to start desktop environment separately
+- Need to start the desktop environment separately
 - More resource intensive
 
-#### 2. **Desktop Sharing (x0vncserver)** ⭐ This script uses this
-Shares your EXISTING desktop that's already running on :0.
+#### 2. Desktop Sharing (x0vncserver) ⭐ This script uses this
+
+Shares your EXISTING desktop that is already running on `:0`.
 
 ```
 Your Computer:
@@ -101,7 +109,7 @@ Your Computer:
 ```
 
 **Pros:**
-- See exactly what's on your physical monitor
+- See exactly what is on your physical monitor
 - No black screen issues
 - Less resource intensive
 - Easier to set up
@@ -109,11 +117,11 @@ Your Computer:
 **Cons:**
 - Only works with X11 (not Wayland)
 - Shows your actual desktop (not private)
-- If you log out, VNC disconnects
+- If you log out physically, VNC disconnects
 
 ### Display Numbers Explained
 
-In X11 (the window system), displays are numbered:
+In X11, displays are numbered:
 
 - `:0` = First display (usually your physical monitor)
 - `:1` = Second display (virtual or second monitor)
@@ -133,67 +141,47 @@ VNC ports correspond to displays:
 ### XAUTHORITY
 
 **What it is:**
-A file that contains authentication credentials for X11 display access.
+A file that contains authentication credentials (a "magic cookie") for X11 display access. Any program that wants to draw to the screen must present this cookie to the X server. Without it, you get the error:
 
-**Why it matters:**
-Without the correct XAUTHORITY file, programs (including x0vncserver) cannot access your X display, resulting in the dreaded black screen or "Unable to open display" errors.
-
-**The Problem:**
-On modern Linux systems, XAUTHORITY is often created in `/tmp/` with a random name like `/tmp/xauth_POSyok` that changes on each login.
-
-**How this script handles it:**
-```bash
-if [ -z "$XAUTHORITY" ]; then
-    if [ -f "$HOME/.Xauthority" ]; then
-        export XAUTHORITY="$HOME/.Xauthority"
-    else
-        TEMP_AUTH=$(find /tmp -maxdepth 1 -name "xauth_*" -user $(whoami) 2>/dev/null | head -1)
-        if [ -n "$TEMP_AUTH" ]; then
-            export XAUTHORITY="$TEMP_AUTH"
-        fi
-    fi
-fi
+```
+Authorization required, but no authorization protocol specified
+x0vncserver: Unable to open display ":0"
 ```
 
-This searches for the XAUTHORITY file in common locations and sets it automatically.
+**The Problem on This System:**
+On openSUSE Tumbleweed with SDDM, the Xauthority file is stored in a restricted directory:
 
-### Systemd Service
+```
+/run/sddm/xauth_<random_suffix>
+```
+
+The random suffix (e.g. `xauth_ozzzRq`) is regenerated on every single boot. The directory permissions are:
+
+```
+drwx--x--x  root root   /run/sddm/
+-rw-------  sddm sddm   xauth_ozzzRq
+```
+
+The file is owned exclusively by the `sddm` user, and SELinux enforcing mode prevents any other process — including root — from reading it across security contexts.
+
+**How this script solves it:**
+By using KDE Autostart, x0vncserver launches inside your already-authenticated graphical session. At that point, `XAUTHORITY` is already set correctly in the environment by SDDM before your desktop even appears. No manual cookie handling is needed.
+
+### KDE Autostart
 
 **What it is:**
-Systemd is the init system used by modern Linux distributions to manage services (programs that run in the background).
+A mechanism built into KDE Plasma that automatically launches applications after the desktop environment finishes loading at login.
 
-**User Services vs System Services:**
-- **System services**: Run as root, start at boot
-- **User services**: Run as your user, stored in `~/.config/systemd/user/`
+**How it works:**
+KDE reads `.desktop` files placed in `~/.config/autostart/` and executes the `Exec=` command of each one after your session is fully established. By this point, all environment variables including `DISPLAY` and `XAUTHORITY` are correctly populated.
 
-This script creates a **user service** so VNC runs as your user account.
+**Why this is better than a systemd user service for VNC:**
+A systemd user service starts in a clean environment before the graphical session is ready. It cannot access `XAUTHORITY` because that variable is set by SDDM only for your interactive session. KDE Autostart runs after SDDM has done all its setup work, so it inherits everything correctly.
 
-**Service File Location:**
+**The autostart file location:**
 ```
-~/.config/systemd/user/x0vncserver.service
+~/.config/autostart/x0vncserver.desktop
 ```
-
-**Key systemd commands:**
-```bash
-systemctl --user start x0vncserver    # Start now
-systemctl --user stop x0vncserver     # Stop now
-systemctl --user enable x0vncserver   # Auto-start on boot
-systemctl --user disable x0vncserver  # Don't auto-start
-systemctl --user status x0vncserver   # Check status
-```
-
-### User Lingering
-
-**What it is:**
-By default, user services only run when you're logged in. "Lingering" allows your user services to run even when you're not logged in.
-
-**Command:**
-```bash
-loginctl enable-linger $USER
-```
-
-**Why it matters:**
-Without lingering, your VNC server would stop when you log out physically, defeating the purpose of remote access.
 
 ### Firewall (firewalld)
 
@@ -201,7 +189,7 @@ Without lingering, your VNC server would stop when you log out physically, defea
 A security system that controls incoming and outgoing network traffic based on predetermined security rules.
 
 **Why it matters:**
-Even if VNC is running, the firewall might block external connections on port 5900.
+Even if VNC is running correctly, the firewall might block external connections on port 5900.
 
 **This script opens port 5900:**
 ```bash
@@ -209,28 +197,65 @@ sudo firewall-cmd --permanent --add-port=5900/tcp
 sudo firewall-cmd --reload
 ```
 
-- `--permanent`: Save the rule across reboots
+- `--permanent`: Save the rule so it survives reboots
 - `--add-port=5900/tcp`: Allow TCP traffic on port 5900
-- `--reload`: Apply changes immediately
+- `--reload`: Apply the changes immediately without restarting the firewall
+
+### SELinux
+
+**What it is:**
+Security-Enhanced Linux adds a mandatory access control layer on top of standard Unix permissions. It assigns a **security context** (label) to every file and process, and enforces rules about which contexts can interact with which others.
+
+**Why it matters for this setup:**
+On openSUSE Tumbleweed, SELinux is set to **enforcing** mode. The SDDM xauth file carries an SELinux label that restricts it to the `sddm_t` security domain. Any process outside that domain — even root — is blocked from reading it.
+
+**Check your SELinux mode:**
+```bash
+sudo getenforce
+# Enforcing
+```
+
+The KDE Autostart approach bypasses this entirely because x0vncserver runs as your own user in your own session context — it never needs to cross security boundaries.
+
+---
+
+## Why the Script Was Redesigned
+
+Version 1.0 of this script used a **systemd user service** at `~/.config/systemd/user/x0vncserver.service` and relied on `loginctl enable-linger` to keep it running at boot.
+
+This failed on openSUSE Tumbleweed due to a chain of three problems:
+
+**Problem 1 — Dynamic xauth path:**
+SDDM stores its xauth file at `/run/sddm/xauth_<random>` with a suffix that changes on every boot. The systemd service could not reliably find it.
+
+**Problem 2 — Permission denied:**
+The `/run/sddm/` directory and the xauth file inside it are owned by the `sddm` user. Even running as root, no other process could access them.
+
+**Problem 3 — SELinux enforcement:**
+All attempts to copy the xauth cookie across security contexts (from the sddm domain to the user session) were blocked by SELinux at the kernel level, regardless of file permissions.
+
+Multiple workarounds were attempted — dynamic path searching, a root-level copy service, a helper script — and all were blocked at the SELinux layer.
+
+**The solution:**
+Replace the systemd service entirely with a **KDE Autostart `.desktop` file**. This launches x0vncserver from inside the fully authenticated graphical session where `XAUTHORITY` is already set, SELinux context is the user's own, and no cross-domain file access is needed.
 
 ---
 
 ## Code Explanations
 
-### Bash Script Features
+### Bash Script Fundamentals
 
 #### Shebang
 ```bash
 #!/bin/bash
 ```
-Tells the system to use bash to execute this script.
+The very first line. Tells the operating system to use `/bin/bash` to interpret and execute this script.
 
 #### Set Options
 ```bash
 set -e
 ```
-- `-e`: Exit immediately if any command fails
-- Prevents script from continuing after errors
+`-e` means exit immediately if any command returns a non-zero (failure) exit code. This prevents the script from continuing after an error has occurred, which could leave the system in a broken half-configured state.
 
 #### Color Variables
 ```bash
@@ -241,10 +266,12 @@ BLUE='\033[0;34m'
 NC='\033[0m'  # No Color
 ```
 
-These are ANSI escape codes for terminal colors:
-- `\033[` = Escape sequence start
-- `0;31m` = Color code (0=normal, 31=red)
-- `NC` = Reset to default color
+These are ANSI escape codes — special sequences that terminal emulators interpret as colour instructions:
+- `\033[` = Start of escape sequence (ESC character)
+- `0;31m` = Colour code (0 = normal intensity, 31 = red foreground)
+- `NC` = "No Colour" — resets the terminal back to its default colour
+
+---
 
 ### Function: print_msg()
 
@@ -252,7 +279,7 @@ These are ANSI escape codes for terminal colors:
 print_msg() {
     local color="$1"
     local msg="$2"
-    
+
     if [ -t 2 ]; then
         echo -e "${color}${msg}${NC}" >&2
     else
@@ -261,29 +288,31 @@ print_msg() {
 }
 ```
 
-**Explanation:**
+**Purpose:** Print a coloured message to the terminal without interfering with captured output.
 
 **Parameters:**
-- `$1` = First positional parameter (color)
-- `$2` = Second positional parameter (message)
+- `$1` = First positional argument (the colour variable)
+- `$2` = Second positional argument (the message text)
+- `local` = Scopes the variable to this function only, preventing it leaking into the rest of the script
 
-**What it does:**
-1. `local color="$1"` - Creates local variable from first argument
-2. `local msg="$2"` - Creates local variable from second argument
-3. `[ -t 2 ]` - Tests if file descriptor 2 (stderr) is a terminal
-4. `echo -e` - Print with escape sequence interpretation
-5. `>&2` - Redirect output to stderr (not stdout)
+**How it decides whether to use colour:**
+- `[ -t 2 ]` tests whether file descriptor 2 (stderr) is connected to an interactive terminal
+- If yes: prints with colour escape codes using `echo -e` (which interprets `\033[...]`)
+- If no (e.g. output is being piped or redirected to a file): strips the colour codes and prints plain text
 
-**Why stderr instead of stdout?**
-- Stdout is for data/results that can be captured
-- Stderr is for messages/diagnostics
-- This prevents diagnostic messages from polluting captured output
+**Why write to stderr (`>&2`) instead of stdout?**
+- **stdout** (file descriptor 1) is for data and results — things that might be captured by other commands
+- **stderr** (file descriptor 2) is for diagnostics and messages
+- Writing messages to stderr means they will never pollute captured output from functions like `detect_graphics()` that return a value via stdout
 
 **Example usage:**
 ```bash
-print_msg "$RED" "Error: Something went wrong"
-print_msg "$GREEN" "Success: All done!"
+print_msg "$RED"   "Error: Something went wrong"
+print_msg "$GREEN" "Success: Setup complete!"
+print_msg "$BLUE"  "Checking dependencies..."
 ```
+
+---
 
 ### Function: detect_graphics()
 
@@ -300,289 +329,375 @@ detect_graphics() {
     if echo "$gpu_info" | grep -qi "intel.*9[0-9][0-9]"; then
         gpu_type="Intel Legacy (Gen 4-7)"
         vnc_options="-AlwaysShared"
-        print_msg "$YELLOW" "Detected: $gpu_type"
-    elif echo "$gpu_info" | grep -qi "intel"; then
-        gpu_type="Intel"
-        vnc_options="-AlwaysShared"
-        print_msg "$GREEN" "Detected: Intel graphics"
-    # ... more conditions ...
+        ...
     fi
 
     echo "$vnc_options"
 }
 ```
 
-**Command breakdown:**
+**Purpose:** Detect which GPU is installed and return appropriate x0vncserver flags.
 
-**lspci:**
-- Lists all PCI devices (graphics cards, network cards, etc.)
-- PCI = Peripheral Component Interconnect (internal bus)
+**`lspci`:**
+Lists all devices connected to the PCI (Peripheral Component Interconnect) bus — graphics cards, network cards, storage controllers, etc.
 
-**grep -i vga:**
-- `grep` = Search for patterns
-- `-i` = Case-insensitive
-- `vga` = Search for "VGA" (Video Graphics Array - graphics cards)
+**`grep -i vga`:**
+- `grep` searches for a pattern in text
+- `-i` makes the search case-insensitive
+- `vga` finds lines describing graphics/video adapters
 
-**Pattern matching:**
+**The regex pattern `"intel.*9[0-9][0-9]"`:**
+- `intel` = literal text
+- `.*` = any characters (zero or more) — a wildcard
+- `9[0-9][0-9]` = the digit 9 followed by any two digits (matches 900–999)
+- So this matches GPU names like "Intel 965", "Intel 945GM", etc.
+
+**Why only stdout for the return value:**
 ```bash
-grep -qi "intel.*9[0-9][0-9]"
+echo "$vnc_options"   # This is the return value — goes to stdout
 ```
-- `-q` = Quiet mode (no output, just exit code)
-- `-i` = Case insensitive
-- `"intel.*9[0-9][0-9]"` = Regular expression:
-  - `intel` = Literal text "intel"
-  - `.*` = Any characters (zero or more)
-  - `9[0-9][0-9]` = 9 followed by any two digits (900-999)
-  
-Matches: "Intel 965", "Intel 945", etc.
-
-**Return value:**
-```bash
-echo "$vnc_options"
-```
-Only this goes to stdout, so when called as:
+All `print_msg` calls go to stderr. When this function is called with:
 ```bash
 local vnc_opts=$(detect_graphics)
 ```
-The variable `vnc_opts` gets `-AlwaysShared`, not the diagnostic messages (which went to stderr).
+The `$()` command substitution captures only stdout, so `vnc_opts` gets just `-AlwaysShared`, not any of the diagnostic messages.
 
-### Regular Expression Matching
+---
 
+### Function: auto_install_tigervnc()
+
+```bash
+auto_install_tigervnc() {
+    if command -v x0vncserver &> /dev/null; then
+        print_msg "$GREEN" "TigerVNC is already installed!"
+        return 0
+    fi
+    ...
+    if command -v zypper &> /dev/null; then
+        sudo zypper install -y tigervnc
+    fi
+}
+```
+
+**`command -v x0vncserver`:**
+- `command -v` searches `$PATH` for the named executable
+- Returns exit code 0 (success) if found, non-zero if not
+- `&> /dev/null` silences both stdout and stderr — we only care about the exit code
+
+**`return 0`:**
+Exits the function with success code. In bash, 0 always means success.
+
+**Package manager detection:**
+The script checks for `zypper`, `apt`, `dnf`, and `pacman` in order. Whichever is found first determines how to install TigerVNC. On openSUSE Tumbleweed, `zypper` is always present.
+
+---
+
+### Function: create_autostart_entry()
+
+```bash
+create_autostart_entry() {
+    print_msg "$BLUE" "Creating KDE autostart entry..."
+
+    mkdir -p "$AUTOSTART_DIR"
+
+    cat > "$AUTOSTART_FILE" << EOF
+[Desktop Entry]
+Type=Application
+Name=x0vncserver
+Comment=VNC Server for X Display
+Exec=x0vncserver -display :0 -rfbport 5900 -PasswordFile $VNC_PASSWD_FILE -localhost no -AlwaysShared
+Hidden=false
+NoDisplay=false
+X-KDE-Autostart-enabled=true
+EOF
+
+    chmod 644 "$AUTOSTART_FILE"
+}
+```
+
+**Purpose:** Create the KDE autostart `.desktop` file that launches x0vncserver at every login.
+
+**`mkdir -p "$AUTOSTART_DIR"`:**
+- Creates `~/.config/autostart/` if it does not already exist
+- `-p` means "create parent directories as needed" and do not error if the directory already exists
+
+**Here Document (`<< EOF ... EOF`):**
+The `cat > file << EOF` pattern writes multi-line content directly to a file:
+- `cat >` writes to the file (overwriting if it exists)
+- `<< EOF` starts a "here document" — everything between `<< EOF` and the closing `EOF` is treated as input to `cat`
+- Variables like `$VNC_PASSWD_FILE` ARE expanded (to prevent expansion, use `<< 'EOF'` with quotes)
+
+**The `.desktop` file format:**
+This is the standard XDG desktop entry format used across Linux desktop environments. KDE reads all `.desktop` files in `~/.config/autostart/` after login and runs the `Exec=` command of each enabled one.
+
+| Key | Purpose |
+|-----|---------|
+| `Type=Application` | Declares this entry launches a program |
+| `Name=x0vncserver` | Display name in KDE's autostart settings panel |
+| `Exec=...` | The exact command KDE runs at login |
+| `Hidden=false` | When `true`, KDE completely ignores this entry |
+| `NoDisplay=false` | When `true`, hides from the UI but still executes |
+| `X-KDE-Autostart-enabled=true` | KDE-specific toggle flag |
+
+**`chmod 644 "$AUTOSTART_FILE"`:**
+Sets permissions to `-rw-r--r--`:
+- Owner (mark): read and write
+- Group: read only
+- Others: read only
+
+This is correct for a configuration file — executable permissions are not needed for `.desktop` files.
+
+---
+
+### Function: enable_service()
+
+```bash
+enable_service() {
+    print_msg "$BLUE" "Enabling VNC autostart on login..."
+
+    if [ ! -f "$AUTOSTART_FILE" ]; then
+        create_autostart_entry
+    else
+        sed -i 's/^Hidden=.*/Hidden=false/' "$AUTOSTART_FILE"
+        sed -i 's/^X-KDE-Autostart-enabled=.*/X-KDE-Autostart-enabled=true/' "$AUTOSTART_FILE"
+        print_msg "$GREEN" "VNC autostart enabled"
+    fi
+}
+```
+
+**Purpose:** Make x0vncserver start automatically at the next login.
+
+**`[ ! -f "$AUTOSTART_FILE" ]`:**
+- `-f` tests whether a path exists and is a regular file
+- `!` negates the test
+- So: if the autostart file does NOT exist, create it from scratch
+
+**`sed -i 's/^Hidden=.*/Hidden=false/'`:**
+- `sed` is the Stream EDitor — it processes text line by line
+- `-i` means edit the file in-place (modify the actual file, not just print to stdout)
+- `s/pattern/replacement/` is the substitution command
+- `^Hidden=` matches lines that start with `Hidden=`
+- `.*` matches everything after the `=` (the current value, whatever it is)
+- Replaces the entire line's value with `Hidden=false`
+
+The second `sed` command does the same for `X-KDE-Autostart-enabled`.
+
+**Why not just delete and recreate the file?**
+Editing in-place preserves any custom settings the user may have added to the file manually.
+
+---
+
+### Function: disable_service()
+
+```bash
+disable_service() {
+    if [ -f "$AUTOSTART_FILE" ]; then
+        sed -i 's/^Hidden=.*/Hidden=true/' "$AUTOSTART_FILE"
+        sed -i 's/^X-KDE-Autostart-enabled=.*/X-KDE-Autostart-enabled=false/' "$AUTOSTART_FILE"
+    fi
+}
+```
+
+**Purpose:** Stop x0vncserver from launching at the next login, without deleting the configuration.
+
+Setting `Hidden=true` causes KDE to completely skip this entry when processing autostart files. The file remains on disk so it can be re-enabled at any time with option 7 — nothing is permanently lost.
+
+---
+
+### Function: start_service()
+
+```bash
+start_service() {
+    pkill -x x0vncserver 2>/dev/null || true
+    sleep 1
+
+    nohup x0vncserver -display :0 \
+        -rfbport 5900 \
+        -PasswordFile "$VNC_PASSWD_FILE" \
+        -localhost no \
+        -AlwaysShared \
+        > /tmp/x0vncserver.log 2>&1 &
+
+    sleep 2
+
+    if pgrep -x x0vncserver > /dev/null; then
+        print_msg "$GREEN" "VNC server started! (PID: $(pgrep -x x0vncserver))"
+    fi
+}
+```
+
+**Purpose:** Start x0vncserver immediately for the current session.
+
+**`pkill -x x0vncserver`:**
+- `pkill` sends a signal to processes matching a name
+- `-x` requires an exact name match (prevents accidentally killing unrelated processes)
+- `2>/dev/null` silences the error if no process was found
+- `|| true` prevents `set -e` from aborting the script if pkill finds nothing to kill
+
+**`nohup ... &`:**
+- `nohup` ("no hangup") prevents the process from dying when the terminal is closed or the script exits
+- `&` runs the command in the background, returning control to the script immediately
+- Together they launch a persistent background process
+
+**`> /tmp/x0vncserver.log 2>&1`:**
+- `>` redirects stdout to the log file
+- `2>&1` also redirects stderr to the same place
+- All output from x0vncserver is captured in `/tmp/x0vncserver.log` for troubleshooting
+
+**`pgrep -x x0vncserver`:**
+- `pgrep` searches for processes by name and returns their PIDs
+- `-x` exact match
+- Returns exit code 0 if found (used here to confirm successful start)
+
+---
+
+### Function: stop_service()
+
+```bash
+stop_service() {
+    if pkill -x x0vncserver 2>/dev/null; then
+        print_msg "$GREEN" "VNC server stopped"
+    else
+        print_msg "$YELLOW" "VNC server was not running"
+    fi
+}
+```
+
+**Purpose:** Stop the currently running x0vncserver process.
+
+`pkill` returns exit code 0 if it successfully killed at least one process, and non-zero if no matching process was found. The `if` statement uses this to report whether anything was actually stopped.
+
+---
+
+### Function: show_service_status()
+
+```bash
+show_service_status() {
+    if pgrep -x x0vncserver > /dev/null; then
+        local pid
+        pid=$(pgrep -x x0vncserver)
+        print_msg "$GREEN" "✓ x0vncserver is RUNNING (PID: $pid)"
+    else
+        print_msg "$RED" "✗ x0vncserver is NOT running"
+    fi
+
+    if [ -f "$AUTOSTART_FILE" ]; then
+        if grep -q "Hidden=true" "$AUTOSTART_FILE"; then
+            print_msg "$YELLOW" "Autostart is DISABLED"
+        else
+            print_msg "$GREEN" "Autostart is ENABLED"
+        fi
+    fi
+
+    if ss -tulpn 2>/dev/null | grep -q ":5900"; then
+        print_msg "$GREEN" "VNC server is listening on port 5900"
+    fi
+}
+```
+
+**Purpose:** Report the current state of the VNC server and autostart configuration.
+
+**`pgrep -x x0vncserver > /dev/null`:**
+Checks if the process is running. Redirecting to `/dev/null` discards the PID output — we only care about the exit code (0 = found, non-zero = not found).
+
+**`grep -q "Hidden=true"`:**
+- `-q` = quiet mode, produces no output
+- Returns exit code 0 if the pattern is found, non-zero if not
+- Used here to check whether autostart is currently disabled
+
+**`ss -tulpn`:**
+- `ss` = socket statistics (modern replacement for `netstat`)
+- `-t` = TCP sockets
+- `-u` = UDP sockets
+- `-l` = listening sockets only
+- `-p` = show process information
+- `-n` = show numeric addresses (don't resolve hostnames)
+
+---
+
+### Function: uninstall_vnc()
+
+```bash
+uninstall_vnc() {
+    pkill -x x0vncserver 2>/dev/null && print_msg "$GREEN" "✓ VNC server stopped" || true
+    rm -f "$AUTOSTART_FILE"
+    rm -f "$START_SCRIPT"
+    rm -rf "$VNC_DIR"
+    rm -f /tmp/x0vncserver.log 2>/dev/null || true
+}
+```
+
+**Purpose:** Completely remove VNC configuration and stop autostart.
+
+**`rm -f`:** Remove file, no error if it doesn't exist (`-f` = force).
+
+**`rm -rf`:** Remove directory and all its contents recursively. Use with care — there is no undo.
+
+**`2>/dev/null || true`:** A safety pattern — suppress any error messages and prevent `set -e` from aborting the script if a file doesn't exist.
+
+---
+
+### Bash Concepts Used Throughout the Script
+
+#### Regular Expression Matching
 ```bash
 if [[ "$install_choice" =~ ^[Yy]$ ]]; then
 ```
+- `[[ ]]` = bash enhanced test command, supports regex
+- `=~` = regex match operator
+- `^[Yy]$` = matches only the single character Y or y (nothing else)
 
-**Explanation:**
-
-**Double brackets `[[ ]]`:**
-- Bash's enhanced test command
-- Supports pattern matching and regular expressions
-
-**`=~` operator:**
-- Regular expression match operator
-- Returns true if left side matches right side pattern
-
-**Pattern `^[Yy]$`:**
-- `^` = Start of string
-- `[Yy]` = Character class - matches 'Y' or 'y'
-- `$` = End of string
-
-**Result:** Matches only "Y" or "y" (nothing else)
-
-**Why not just `==`?**
+#### Redirect Operators
 ```bash
-if [ "$install_choice" == "y" ]; then  # Only matches lowercase 'y'
-if [[ "$install_choice" =~ ^[Yy]$ ]]; # Matches 'y' OR 'Y'
+command &> /dev/null    # Discard all output (stdout and stderr)
+command > file          # Redirect stdout to file
+command 2> file         # Redirect stderr to file
+command >> file         # Append stdout to file
+command 2>&1            # Redirect stderr to same place as stdout
 ```
 
-### Redirect Operators
-
-```bash
-command &> /dev/null
-```
-
-**Breakdown:**
-- `&>` = Redirect both stdout and stderr
-- `/dev/null` = Special file that discards all data written to it (the "bit bucket")
-
-**Effect:** Silences all output from the command
-
-**Other redirect operators:**
-```bash
->   # Redirect stdout only
-2>  # Redirect stderr only
-&>  # Redirect both stdout and stderr
->>  # Append stdout (instead of overwrite)
-2>> # Append stderr
-```
-
-**Example:**
-```bash
-sudo firewall-cmd --permanent --add-port=5900/tcp &> /dev/null
-```
-Runs the firewall command but doesn't show any output.
-
-### Command Substitution
-
+#### Command Substitution
 ```bash
 local vnc_opts=$(detect_graphics)
+ip_addr=$(hostname -I | awk '{print $1}')
 ```
+`$()` executes the command inside and captures its stdout as a string value.
 
-**Syntax:** `$(command)`
-
-**What it does:**
-- Executes the command inside `$()`
-- Captures stdout (not stderr)
-- Assigns the output to the variable
-
-**Older syntax:** Backticks `` `command` `` (deprecated)
-
-**Example:**
+#### Conditional Execution
 ```bash
-current_user=$(whoami)       # Captures username
-current_dir=$(pwd)            # Captures current directory
-file_count=$(ls | wc -l)      # Counts files in directory
+command1 && command2   # Run command2 only if command1 succeeds
+command1 || command2   # Run command2 only if command1 fails
+command || true        # Always succeed even if command fails
 ```
 
-### Conditional Execution
-
+#### Arrays
 ```bash
-command1 && command2  # Run command2 only if command1 succeeds
-command1 || command2  # Run command2 only if command1 fails
+local deps=("x0vncserver" "vncpasswd")
+for dep in "${deps[@]}"; do
+    ...
+done
 ```
+- `deps=("a" "b" "c")` creates an array
+- `"${deps[@]}"` expands all elements as separate quoted strings
+- `${#deps[@]}` gives the number of elements
 
-**Example in script:**
+#### Test Operators
 ```bash
-loginctl enable-linger "$USER" 2>/dev/null || true
+[ -f "$file" ]   # True if file exists and is a regular file
+[ -d "$dir" ]    # True if directory exists
+[ -z "$var" ]    # True if variable is empty (zero length)
+[ -n "$var" ]    # True if variable is not empty
+[ -t 2 ]         # True if file descriptor 2 (stderr) is a terminal
 ```
 
-**Breakdown:**
-1. Try to enable lingering
-2. Redirect errors to /dev/null (hide error messages)
-3. `|| true` = If it fails, run `true` (which always succeeds)
-4. This prevents `set -e` from terminating the script if lingering fails
-
-### Here Documents (Heredoc)
-
+#### chmod Permission Numbers
 ```bash
-cat > "$START_SCRIPT" << EOF
-#!/bin/bash
-# Script content here
-x0vncserver -display :0 \
-    -rfbport 5900
-EOF
+chmod 700 "$VNC_DIR"         # rwx------  owner only
+chmod 600 "$VNC_PASSWD_FILE" # rw-------  owner read/write only
+chmod 644 "$AUTOSTART_FILE"  # rw-r--r--  owner rw, others read
 ```
 
-**Syntax:** `<< DELIMITER`
-
-**What it does:**
-- Allows multi-line string input
-- Everything between `<< EOF` and `EOF` is treated as input
-- Variables are expanded (use `'EOF'` to prevent expansion)
-
-**Example:**
-```bash
-cat > file.txt << 'EOF'
-This is line 1
-$HOME is not expanded
-EOF
-```
-
-vs.
-
-```bash
-cat > file.txt << EOF
-This is line 1
-$HOME is expanded to: $HOME
-EOF
-```
-
-### Parameter Expansion
-
-```bash
-${#missing[@]}      # Array length
-${missing[*]}       # All array elements as single string
-${missing[@]}       # All array elements as separate strings
-$(dirname "$FILE")  # Get directory part of path
-$(whoami)           # Get current username
-```
-
-**Examples:**
-```bash
-path="/home/user/file.txt"
-$(dirname "$path")   # Returns: /home/user
-$(basename "$path")  # Returns: file.txt
-```
-
-### Test Operators
-
-```bash
-[ -f "$file" ]     # True if file exists and is regular file
-[ -d "$dir" ]      # True if directory exists
-[ -z "$var" ]      # True if variable is empty
-[ -n "$var" ]      # True if variable is not empty
-[ -t 2 ]           # True if file descriptor 2 (stderr) is terminal
-```
-
-**Example:**
-```bash
-if [ ! -d "$VNC_DIR" ]; then
-    mkdir -p "$VNC_DIR"
-fi
-```
-- `!` = NOT operator
-- `[ ! -d "$VNC_DIR" ]` = True if directory does NOT exist
-- `mkdir -p` = Create directory and parents if needed
-
-### Command Operators
-
-#### Pipe `|`
-```bash
-lspci | grep -i vga
-```
-Sends stdout of first command to stdin of second command.
-
-#### Logical AND `&&`
-```bash
-command1 && command2
-```
-Execute command2 only if command1 succeeds (exit code 0).
-
-#### Logical OR `||`
-```bash
-command1 || command2
-```
-Execute command2 only if command1 fails (exit code non-zero).
-
-#### Background `&`
-```bash
-command &
-```
-Run command in background, return control to shell immediately.
-
-### Find Command
-
-```bash
-find /tmp -maxdepth 1 -name "xauth_*" -user $(whoami) 2>/dev/null | head -1
-```
-
-**Breakdown:**
-- `find /tmp` = Search in /tmp directory
-- `-maxdepth 1` = Don't search subdirectories
-- `-name "xauth_*"` = Files matching pattern (wildcard)
-- `-user $(whoami)` = Only files owned by current user
-- `2>/dev/null` = Hide error messages
-- `| head -1` = Take only first result
-
-### Chmod (Change Mode)
-
-```bash
-chmod 700 "$VNC_DIR"
-chmod 600 "$VNC_PASSWD_FILE"
-chmod +x "$START_SCRIPT"
-```
-
-**Permission numbers (octal):**
-- `7` = rwx (read, write, execute) = 4+2+1
-- `6` = rw- (read, write) = 4+2+0
-- `0` = --- (no permissions)
-
-**Three digits represent:**
-1. Owner permissions
-2. Group permissions
-3. Other users permissions
-
-**Examples:**
-- `700` = Owner: rwx, Group: ---, Others: ---
-- `600` = Owner: rw-, Group: ---, Others: ---
-- `755` = Owner: rwx, Group: r-x, Others: r-x
-
-**Symbolic mode:**
-```bash
-chmod +x file     # Add execute permission for all
-chmod u+x file    # Add execute for user (owner) only
-chmod go-w file   # Remove write for group and others
-```
+Each digit is the sum of: read(4) + write(2) + execute(1). Three digits cover owner, group, and others.
 
 ---
 
@@ -590,179 +705,149 @@ chmod go-w file   # Remove write for group and others
 
 ### Prerequisites
 
-- openSUSE Tumbleweed (or compatible Linux distribution)
-- X11 display server (not Wayland)
+- openSUSE Tumbleweed with KDE Plasma desktop
+- X11 session (not Wayland — see FAQ)
 - sudo access
 - Active network connection
 
-### Step 1: Download the Script
-
-Save the script to your home directory:
+### Step 1: Confirm You Are on X11
 
 ```bash
-nano ~/vnc-manager.sh
+echo $XDG_SESSION_TYPE
+# Must output: x11
 ```
 
-Paste the script content, then save (Ctrl+X, Y, Enter).
+If it outputs `wayland`, log out, and at the SDDM login screen click the session selector (bottom-left) and choose **Plasma (X11)**.
 
-### Step 2: Make Executable
+### Step 2: Make the Script Executable
 
 ```bash
-chmod +x ~/vnc-manager.sh
+chmod +x vnc_setup_manager.sh
 ```
 
 ### Step 3: Run the Script
 
 ```bash
-~/vnc-manager.sh
+./vnc_setup_manager.sh
 ```
+
+> Do NOT run with `sudo`. The script will ask for your sudo password only when needed.
 
 ### Menu Options Explained
 
 #### 1) Full Setup (First Time Setup)
-**What it does:**
-- Checks/installs TigerVNC
-- Creates all directories and config files
-- Prompts for VNC password
-- Configures firewall
-- Starts VNC server
-- Enables auto-start on boot
 
-**When to use:** First time setting up VNC
+What it does, in order:
+1. Checks TigerVNC is installed (offers to install if not)
+2. Creates `~/.vnc/` directory
+3. Prompts you to set a VNC password
+4. Creates `~/.vnc/config`
+5. Creates `~/.config/autostart/x0vncserver.desktop`
+6. Configures the firewall (if firewalld is running)
+7. Starts x0vncserver immediately for this session
 
-**What you'll need:**
-- Sudo password (for firewall)
-- VNC password (6-8 characters)
+**When to use:** First time setting up VNC on this machine.
 
-#### 2) Set/Change VNC Password
-**What it does:**
-- Prompts for new VNC password
-- Updates password file
-
-**When to use:** 
-- Forgot your password
-- Want to change password for security
-
-#### 3) Configure Firewall
-**What it does:**
-- Opens port 5900 in firewall
-- Reloads firewall rules
-
-**When to use:**
-- After fresh firewall configuration
-- If connections are blocked
-
-#### 4-6) Start/Stop/Restart Service
-**What they do:**
-- Control VNC server process
-- Don't affect auto-start setting
-
-**When to use:**
-- After making configuration changes (restart)
-- To temporarily disable access (stop)
-- To start after stopping (start)
-
-#### 7-8) Enable/Disable Service
-**What they do:**
-- Control auto-start on boot
-- Enable also starts service now
-- Disable also stops service now
-
-**When to use:**
-- Enable: Want VNC to start automatically
-- Disable: Don't want automatic start
-
-#### 9) Show Service Status
-**What it does:**
-- Shows systemd service status
-- Shows if listening on port 5900
-
-**When to use:**
-- Troubleshooting connection issues
-- Verify server is running
-
-#### 10) Show Service Logs
-**What it does:**
-- Displays last 50 lines of VNC server logs
-
-**When to use:**
-- Troubleshooting errors
-- Checking connection attempts
-
-
-<p align ="center ">
-!<img src ="Menu11.png">
-</p>
-
-
-#### 11) Show Connection Info
-**What it does:**
-- Displays your IP address
-- Shows VNC port
-- Provides Remmina configuration details
-
-**When to use:**
-- Setting up client connection
-- Sharing access info with others
-
-#### 12) Show System Information
-**What it does:**
-- Displays hostname and IP
-- Shows graphics hardware
-- Displays desktop environment
-
-**When to use:**
-- Verify hardware detection
-- Check if using X11 or Wayland
-
-#### 13) Complete Uninstall
-**What it does:**
-- Stops and removes VNC service
-- Deletes all configuration files
-- Removes startup scripts
-- Disables user lingering
-
-**What it keeps:**
-- TigerVNC package (must remove manually)
-- Firewall rules (for security)
-
-**When to use:**
-- Starting over with fresh setup
-- Removing VNC completely
+**What you will need:**
+- Your sudo password (for firewall)
+- A VNC password (6-8 characters recommended)
 
 ---
 
-## Connecting from Client
+#### 2) Set/Change VNC Password
+
+Re-runs `vncpasswd` to set a new password in `~/.vnc/passwd`. Use this if you forgot your VNC password or want to change it for security reasons. Does not affect the running server — restart it (option 6) for the new password to take effect.
+
+---
+
+#### 3) Configure Firewall
+
+Opens port 5900 in firewalld. Only needed if firewalld is installed and running. If connections are being refused from another machine despite VNC running correctly, this is the first thing to check.
+
+---
+
+#### 4) Start VNC Server
+
+Starts x0vncserver in the background for the current session using `nohup`. Output is logged to `/tmp/x0vncserver.log`. Does not affect the autostart setting.
+
+---
+
+#### 5) Stop VNC Server
+
+Stops the running x0vncserver process using `pkill`. Does not affect the autostart setting.
+
+---
+
+#### 6) Restart VNC Server
+
+Stops then starts x0vncserver. Use this after changing the VNC password or configuration.
+
+---
+
+#### 7) Enable Autostart (start at login)
+
+Sets `Hidden=false` and `X-KDE-Autostart-enabled=true` in the `.desktop` file. VNC will start automatically at the next login. Creates the autostart file from scratch if it does not exist.
+
+---
+
+#### 8) Disable Autostart
+
+Sets `Hidden=true` in the `.desktop` file. VNC will no longer start automatically at login. The configuration is preserved and can be re-enabled with option 7.
+
+---
+
+#### 9) Show VNC Status
+
+Reports:
+- Whether x0vncserver is currently running (and its PID)
+- Whether autostart is enabled or disabled
+- Whether port 5900 is currently open and listening
+
+---
+
+#### 10) Show Logs
+
+Displays the last 50 lines of `/tmp/x0vncserver.log` plus any matching entries from the system journal. Use this when VNC is not connecting or crashes.
+
+---
+
+#### 11) Show Connection Info
+
+Displays your machine's IP address, VNC port, and the exact settings to enter in Remmina or another VNC client.
+
+---
+
+#### 12) Show System Information
+
+Displays hostname, IP address, graphics hardware, OpenGL renderer, display server type (X11 or Wayland), and desktop environment. Useful for verifying the environment before troubleshooting.
+
+---
+
+#### 13) Complete Uninstall
+
+Stops x0vncserver, removes the autostart `.desktop` file, removes `~/.vnc/` and all its contents, and clears the log file. Does NOT remove the TigerVNC package or firewall rules (shown how to do manually).
+
+---
+
+## Connecting from a Client
 
 ### Using Remmina (Recommended)
 
-<p align ="center ">
-!<img src ="remmina.png">
+<p align="center">
+<img src="remmina.png">
 </p>
 
+1. Open Remmina: click the `+` button to create a new connection
+2. Set **Protocol** to `VNC - Virtual Network Computing`
+3. Set **Server** to your machine's IP address followed by `:5900` — for example `192.168.0.39:5900`
+4. Enter your VNC password
+5. Set **Color Depth** to `True color (24 bpp)`
+6. Click Save and Connect
 
-1. **Open Remmina**
-   ```bash
-   remmina
-   ```
-
-2. **Create New Connection**
-   - Click the `+` button
-
-3. **Configure Connection**
-   - **Name:** Tumbleweed Desktop (or your choice)
-   - **Protocol:** VNC - Virtual Network Computing
-   - **Server:** `192.168.0.39:5900` (use your server's IP)
-   - **Username:** (leave blank)
-   - **Password:** Your VNC password
-   - **Color Depth:** True color (24 bpp)
-   - **Quality:** Medium or Good
-
-4. **Advanced Settings (Optional)**
-   - Enable compression: ✓ (for better performance)
-   - Disable encryption: ✓ (if using basic VncAuth)
-
-5. **Save and Connect**
+Find your IP address with:
+```bash
+hostname -I | awk '{print $1}'
+```
 
 ### Using Command Line VNC Viewer
 
@@ -772,585 +857,407 @@ vncviewer 192.168.0.39:5900
 
 ### From Windows
 
-Use **TigerVNC Viewer** or **RealVNC Viewer**:
-1. Download and install VNC viewer
-2. Enter: `192.168.0.39:5900`
-3. Enter password when prompted
+Use **TigerVNC Viewer** or **RealVNC Viewer**. Enter `192.168.0.39:5900` and the VNC password when prompted.
 
 ---
 
 ## Troubleshooting
 
-### Black Screen
+### VNC Does Not Start After Reboot
 
-**Causes:**
-1. Wrong XAUTHORITY path
-2. Using Wayland instead of X11
-3. Desktop environment not starting
+**Check the autostart file exists and is enabled:**
+```bash
+cat ~/.config/autostart/x0vncserver.desktop
+```
 
-**Solutions:**
+Look for `Hidden=false` and `X-KDE-Autostart-enabled=true`. If the file is missing, run the script and choose option 7.
 
-**Check display server:**
+**Check your session type:**
 ```bash
 echo $XDG_SESSION_TYPE
 ```
-Should show `x11`, not `wayland`.
+Must be `x11`. If `wayland`, switch at the SDDM login screen.
 
-**If Wayland, switch to X11:**
-1. Log out
-2. At login screen, click gear icon
-3. Select "Plasma (X11)" or "GNOME on Xorg"
-4. Log back in
-5. Restart VNC service
-
-**Verify XAUTHORITY:**
+**Start manually and check for errors:**
 ```bash
-echo $XAUTHORITY
-ls -l $XAUTHORITY
+x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no -AlwaysShared
 ```
 
-**Manual fix:**
+---
+
+### Cannot Connect from Another Machine
+
+**Is VNC actually running?**
 ```bash
-systemctl --user stop x0vncserver
-export XAUTHORITY=$(echo $XAUTHORITY)
-x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no
+pgrep -x x0vncserver
+ss -tulpn | grep 5900
 ```
 
-### Cannot Connect
-
-**Possible causes:**
-1. Firewall blocking
-2. Wrong IP address
-3. VNC server not running
-
-**Check firewall:**
+**Is the firewall blocking it?**
 ```bash
-sudo firewall-cmd --list-all | grep 5900
+sudo firewall-cmd --list-ports
+# Should show: 5900/tcp
 ```
 
-Should show: `ports: 5900/tcp`
-
-**Open firewall manually:**
+**Open port manually if needed:**
 ```bash
 sudo firewall-cmd --permanent --add-port=5900/tcp
 sudo firewall-cmd --reload
 ```
 
-**Check VNC is running:**
-```bash
-systemctl --user status x0vncserver
-netstat -tulpn | grep 5900
-```
-
-**Find your IP address:**
+**Find your correct IP:**
 ```bash
 hostname -I
-ip addr show
 ```
 
-### Service Fails to Start
+---
 
-**Check logs:**
+### Black Screen When Connected
+
+Usually means x0vncserver started before the desktop finished loading, or you are on Wayland.
+
 ```bash
-journalctl --user -u x0vncserver.service -n 50
+echo $XDG_SESSION_TYPE   # Must be x11
 ```
 
-**Common errors:**
+If on X11, try disconnecting and reconnecting after waiting 10-15 seconds from login.
 
-**"Unable to open display"**
-- XAUTHORITY problem
-- Run option 13 (Uninstall), then option 1 (Full Setup)
+---
 
-**"Address already in use"**
-- Another process using port 5900
-- Kill it: `pkill x0vncserver`
+### Authorization / Display Errors in Logs
 
-**"Permission denied"**
-- Password file wrong permissions
-- Fix: `chmod 600 ~/.vnc/passwd`
-
-### Service Won't Auto-Start on Boot
-
-**Check if enabled:**
-```bash
-systemctl --user status x0vncserver
+```
+Authorization required, but no authorization protocol specified
+x0vncserver: Unable to open display ":0"
 ```
 
-Should show: `enabled`
+This means x0vncserver was started outside of a proper graphical session — for example from a terminal before logging into the desktop, or via a broken systemd service. The fix is to ensure VNC is launched via KDE Autostart only (the default in v2.0). Run option 13 (Uninstall) then option 1 (Full Setup) to reset cleanly.
 
-**Check lingering:**
-```bash
-loginctl show-user $USER | grep Linger
-```
-
-Should show: `Linger=yes`
-
-**Enable manually:**
-```bash
-systemctl --user enable x0vncserver
-loginctl enable-linger $USER
-```
+---
 
 ### Password Not Working
 
-**Reset password:**
 ```bash
-~/vnc-manager.sh
-# Select option 2
-```
-
-Or manually:
-```bash
+# Recreate the password file
 vncpasswd ~/.vnc/passwd
 chmod 600 ~/.vnc/passwd
+# Then restart VNC (option 6)
 ```
+
+---
 
 ### Slow Performance
 
-**Reduce color depth in Remmina:**
-- Change Color Depth to: High color (16 bpp) or 256 colors (8 bpp)
-
-**Reduce quality:**
-- Change Quality to: Poor or Medium
-
-**Enable compression:**
-- Check "Enable compression" in Advanced settings
-
-**Check network:**
-```bash
-ping [server-ip]
-```
+In Remmina, try:
+- **Color Depth:** High color (16 bpp) or 256 colors (8 bpp)
+- **Quality:** Poor or Medium
+- **Enable compression:** checked
 
 ---
 
 ## Advanced Configuration
 
-### Custom VNC Options
+### Changing the VNC Port
 
-Edit `~/start-vnc.sh` to add custom options:
-
+Edit the autostart file:
 ```bash
-x0vncserver -display :0 \
-    -rfbport 5900 \
-    -PasswordFile "$HOME/.vnc/passwd" \
-    -localhost no \
-    -AlwaysShared \
-    -MaxProcessorUsage 50 \      # Limit CPU usage
-    -Log *:stderr:30              # More verbose logging
+nano ~/.config/autostart/x0vncserver.desktop
 ```
 
-### Different Port
+Change `-rfbport 5900` to your preferred port, e.g. `-rfbport 5901`.
 
-To use a different port:
-
-1. Edit `~/start-vnc.sh`:
-   ```bash
-   -rfbport 5901  # Instead of 5900
-   ```
-
-2. Open firewall:
-   ```bash
-   sudo firewall-cmd --permanent --add-port=5901/tcp
-   sudo firewall-cmd --reload
-   ```
-
-3. Restart service:
-   ```bash
-   systemctl --user restart x0vncserver
-   ```
-
-4. Connect to: `server-ip:5901`
-
-### Security Hardening
-
-**1. Use SSH Tunnel (Most Secure)**
-
-On client machine:
+Open the new port in the firewall:
 ```bash
-ssh -L 5900:localhost:5900 user@server-ip
+sudo firewall-cmd --permanent --add-port=5901/tcp
+sudo firewall-cmd --reload
 ```
 
-Then connect VNC to: `localhost:5900`
+Then stop and start VNC (options 5 and 4).
 
-This encrypts all VNC traffic through SSH.
+### Adding Custom x0vncserver Flags
 
-**2. Limit to Local Network**
+Edit the `Exec=` line in `~/.config/autostart/x0vncserver.desktop`:
 
-Edit `/etc/hosts.allow`:
-```
-x0vncserver: 192.168.0.0/24
-```
-
-Edit `/etc/hosts.deny`:
-```
-x0vncserver: ALL
+```ini
+Exec=x0vncserver -display :0 -rfbport 5900 -PasswordFile /home/mark/.vnc/passwd -localhost no -AlwaysShared -MaxProcessorUsage 50
 ```
 
-**3. Use VeNCrypt (TLS encryption)**
+Available flags include:
+- `-MaxProcessorUsage 50` — limit CPU usage to 50%
+- `-DeferUpdate 50` — wait 50ms between screen updates (reduces CPU at cost of smoothness)
+- `-Log *:stderr:30` — more verbose logging
 
-Requires certificates - beyond scope of this guide.
+### Security: SSH Tunnel
+
+For encrypted remote access, tunnel VNC through SSH:
+
+On the client machine:
+```bash
+ssh -L 5900:localhost:5900 mark@server-ip
+```
+
+Then connect your VNC client to `localhost:5900`. All traffic is encrypted by SSH.
 
 ---
 
-## Files Created by Script
-
-### Configuration Files
+## Files Created by the Script
 
 | File | Purpose | Permissions |
 |------|---------|-------------|
-| `~/.vnc/passwd` | VNC password (encrypted) | 600 (rw-------) |
-| `~/.vnc/config` | VNC configuration | 644 (rw-r--r--) |
-| `~/start-vnc.sh` | Startup script | 755 (rwxr-xr-x) |
-| `~/.config/systemd/user/x0vncserver.service` | Systemd service | 644 (rw-r--r--) |
+| `~/.vnc/passwd` | Encrypted VNC password (binary) | `600` (rw-------) |
+| `~/.vnc/config` | VNC server settings | `644` (rw-r--r--) |
+| `~/.config/autostart/x0vncserver.desktop` | KDE autostart entry | `644` (rw-r--r--) |
+| `/tmp/x0vncserver.log` | Runtime log (cleared on reboot) | auto |
 
-### What Each File Contains
+### ~/.vnc/config Contents
 
-**~/.vnc/passwd:**
-- Binary file (not human-readable)
-- Contains encrypted VNC password
-- Created by `vncpasswd` command
-
-**~/.vnc/config:**
-```
+```ini
+# VNC Server Configuration
 securitytypes=vncauth
 geometry=1920x1080
 localhost=no
 alwaysshared
 ```
 
-**~/start-vnc.sh:**
-```bash
-#!/bin/bash
-# Finds XAUTHORITY
-# Starts x0vncserver with detected graphics options
+| Setting | Meaning |
+|---------|---------|
+| `securitytypes=vncauth` | Use password authentication |
+| `geometry=1920x1080` | Resolution hint for virtual desktops (informational for x0vncserver) |
+| `localhost=no` | Accept connections from other machines |
+| `alwaysshared` | Allow multiple VNC clients to connect at once |
+
+### ~/.config/autostart/x0vncserver.desktop Contents
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=x0vncserver
+Comment=VNC Server for X Display
+Exec=x0vncserver -display :0 -rfbport 5900 -PasswordFile /home/mark/.vnc/passwd -localhost no -AlwaysShared
+Hidden=false
+NoDisplay=false
+X-KDE-Autostart-enabled=true
 ```
 
-**~/.config/systemd/user/x0vncserver.service:**
-```ini
-[Unit]
-Description=x0vncserver - VNC Server for X Display
-After=graphical.target
+---
 
-[Service]
-Type=simple
-ExecStart=/home/username/start-vnc.sh
-Restart=on-failure
-RestartSec=5
+## Complete Command Reference
 
-[Install]
-WantedBy=default.target
+### VNC Process Commands
+
+```bash
+# Check if VNC is running
+pgrep -x x0vncserver
+
+# Start manually
+nohup x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no -AlwaysShared > /tmp/x0vncserver.log 2>&1 &
+
+# Stop VNC
+pkill -x x0vncserver
+
+# View live log
+tail -f /tmp/x0vncserver.log
+```
+
+### Autostart Management
+
+```bash
+# View autostart file
+cat ~/.config/autostart/x0vncserver.desktop
+
+# Enable autostart manually
+sed -i 's/^Hidden=.*/Hidden=false/' ~/.config/autostart/x0vncserver.desktop
+sed -i 's/^X-KDE-Autostart-enabled=.*/X-KDE-Autostart-enabled=true/' ~/.config/autostart/x0vncserver.desktop
+
+# Disable autostart manually
+sed -i 's/^Hidden=.*/Hidden=true/' ~/.config/autostart/x0vncserver.desktop
+```
+
+### Firewall Commands
+
+```bash
+sudo firewall-cmd --list-ports                          # View open ports
+sudo firewall-cmd --permanent --add-port=5900/tcp       # Open port 5900
+sudo firewall-cmd --permanent --remove-port=5900/tcp    # Close port 5900
+sudo firewall-cmd --reload                              # Apply changes
+sudo firewall-cmd --list-all                            # Full firewall config
+```
+
+### Network Diagnostic Commands
+
+```bash
+ss -tulpn | grep 5900       # Is port 5900 listening?
+hostname -I                 # Your IP address
+ping [server-ip]            # Test basic connectivity
+nc -zv [server-ip] 5900    # Test VNC port specifically
+```
+
+### File Permission Commands
+
+```bash
+ls -la ~/.vnc/
+chmod 700 ~/.vnc
+chmod 600 ~/.vnc/passwd
+chmod 644 ~/.vnc/config
+chmod 644 ~/.config/autostart/x0vncserver.desktop
+```
+
+### Quick Reference Card
+
+```bash
+# Start VNC Manager
+./vnc_setup_manager.sh
+
+# Quick manual start
+x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no -AlwaysShared &
+
+# Check VNC is running
+pgrep -x x0vncserver
+
+# View logs
+tail -f /tmp/x0vncserver.log
+
+# Find your IP
+hostname -I | awk '{print $1}'
+
+# Check port is open
+ss -tulpn | grep 5900
+```
+
+### Emergency Recovery
+
+```bash
+# Kill all VNC processes
+pkill -9 x0vncserver
+
+# Check session type (must be x11)
+echo $XDG_SESSION_TYPE
+
+# Check autostart file
+cat ~/.config/autostart/x0vncserver.desktop
+
+# Full reset: uninstall then fresh setup
+./vnc_setup_manager.sh   # Option 13, then Option 1
 ```
 
 ---
 
 ## Frequently Asked Questions
 
-### Q: Will this work on other distributions?
+### Q: Will this work on other Linux distributions?
 
-**A:** Mostly yes, with modifications:
-- **Debian/Ubuntu**: Change `zypper` to `apt`
-- **Fedora/RHEL**: Change `zypper` to `dnf`
-- **Arch**: Change `zypper` to `pacman`
-
-The script attempts to detect your package manager automatically.
+**A:** The KDE Autostart approach works on any system running KDE Plasma (and most other desktop environments that honour the XDG autostart spec). The package manager detection in the script supports `zypper`, `apt`, `dnf`, and `pacman`. The main requirement is KDE Plasma on X11.
 
 ### Q: Can I use this with Wayland?
 
-**A:** No. x0vncserver requires X11. You must:
-1. Switch to X11 session
-2. Or use alternative like `wayvnc` (requires different setup)
+**A:** No. `x0vncserver` requires X11. At the SDDM login screen, select **Plasma (X11)** instead of **Plasma (Wayland)**. Alternatively, `wayvnc` can be used with Wayland but requires a completely different setup not covered by this script.
+
+### Q: Why not use a systemd user service?
+
+**A:** On openSUSE Tumbleweed with SDDM and SELinux enforcing, systemd user services cannot access the XAUTHORITY file that SDDM creates for the X session. The file is locked to the `sddm` security context and no cross-domain access is permitted. KDE Autostart bypasses this entirely by launching inside the already-authenticated session.
 
 ### Q: Does this work with multiple monitors?
 
-**A:** Yes, x0vncserver shares all monitors on display :0. The VNC client will show your entire desktop spanning all monitors.
+**A:** Yes. `x0vncserver` shares the entire display `:0`, which spans all monitors. The VNC client will show your full desktop across all screens.
 
 ### Q: Can multiple people connect simultaneously?
 
-**A:** Yes, with the `-AlwaysShared` flag (enabled by default in this script). All connections see the same desktop and can control it.
+**A:** Yes. The `-AlwaysShared` flag (enabled by default) allows multiple VNC clients to connect at the same time. All connections see and can control the same desktop.
 
 ### Q: Is this secure?
 
-**A:** Basic security:
-- Password protected
-- Firewall configured
-
-For better security:
-- Use SSH tunnel
-- Use VeNCrypt (TLS encryption)
-- Restrict to local network only
-
-### Q: Will this work over the internet?
-
-**A:** Yes, but requires:
-1. Port forwarding on your router (5900 → your computer)
-2. Your public IP address or dynamic DNS
-3. Strong password
-4. Preferably SSH tunnel
-
-Not recommended without SSH tunnel due to security risks.
-
-### Q: What's the difference between TigerVNC and x11vnc?
-
-**A:**
-- **TigerVNC**: Modern, actively maintained, better performance
-- **x11vnc**: Older, deprecated, but had good features
-
-This script uses TigerVNC's `x0vncserver` component.
+**A:** It provides basic security — password protection and firewall rules. For better security over untrusted networks, use an SSH tunnel to encrypt all VNC traffic. Do not expose port 5900 directly to the internet without a tunnel.
 
 ### Q: Can I run this on a headless server?
 
-**A:** No. x0vncserver requires an existing X11 display. For headless servers, use `Xvnc` to create a virtual display (different setup).
-
----
-
-## Complete Command Reference
-
-### Systemd Commands
-
-```bash
-# User service commands
-systemctl --user start x0vncserver      # Start service
-systemctl --user stop x0vncserver       # Stop service
-systemctl --user restart x0vncserver    # Restart service
-systemctl --user status x0vncserver     # Check status
-systemctl --user enable x0vncserver     # Enable auto-start
-systemctl --user disable x0vncserver    # Disable auto-start
-
-# View logs
-journalctl --user -u x0vncserver        # All logs
-journalctl --user -u x0vncserver -f     # Follow logs (live)
-journalctl --user -u x0vncserver -n 50  # Last 50 lines
-
-# Reload systemd
-systemctl --user daemon-reload          # After editing service file
-```
-
-### Firewall Commands
-
-```bash
-# Add rules
-sudo firewall-cmd --permanent --add-port=5900/tcp
-sudo firewall-cmd --permanent --add-port=5900-5910/tcp  # Range
-sudo firewall-cmd --permanent --add-service=vnc-server
-
-# Remove rules
-sudo firewall-cmd --permanent --remove-port=5900/tcp
-sudo firewall-cmd --permanent --remove-service=vnc-server
-
-# Apply changes
-sudo firewall-cmd --reload
-
-# View configuration
-sudo firewall-cmd --list-all
-sudo firewall-cmd --list-ports
-sudo firewall-cmd --list-services
-```
-
-### VNC Commands
-
-```bash
-# Set password
-vncpasswd ~/.vnc/passwd
-
-# Start x0vncserver manually
-x0vncserver -display :0 -rfbport 5900 -Password
-```
-
-
-### How to kill VNC processes 
-
-ps aux | grep vnc
-
-### Network Commands
-```bash
-# Check if port is open
-netstat -tulpn | grep 5900
-ss -tulpn | grep 5900
-lsof -i :5900
-
-# Find your IP address
-hostname -I
-ip addr show
-ifconfig
-
-# Test connectivity
-ping [server-ip]
-telnet [server-ip] 5900
-nc -zv [server-ip] 5900
-```
-
-### File Permission Commands
-```bash
-# View permissions
-ls -la ~/.vnc/
-ls -la ~/start-vnc.sh
-
-# Set permissions
-chmod 700 ~/.vnc                # Directory: owner only
-chmod 600 ~/.vnc/passwd         # Password: owner read/write only
-chmod 644 ~/.vnc/config         # Config: owner rw, others read
-chmod +x ~/start-vnc.sh         # Make executable
-
-# Change ownership
-chown username:username ~/.vnc/passwd
-```
+**A:** No. `x0vncserver` requires an existing X11 display. For headless servers, use `Xvnc` to create a virtual framebuffer display — this is a different setup not covered by this script.
 
 ---
 
 ## Performance Tuning
 
-### Server-Side Optimization
+### Reduce CPU Usage
 
-**1. Limit CPU Usage**
+Edit the `Exec=` line in the autostart file to add:
 
-Edit `~/start-vnc.sh`:
-```bash
-x0vncserver ... -MaxProcessorUsage 50
+```ini
+Exec=x0vncserver ... -MaxProcessorUsage 50 -DeferUpdate 50
 ```
 
-**2. Adjust Compression**
+- `-MaxProcessorUsage 50` caps CPU at 50%
+- `-DeferUpdate 50` reduces update frequency (50ms between frames)
+
+### Reduce Bandwidth
 
 In `~/.vnc/config`:
-
-## CompareFB=0      # Disable framebuffer comparison (faster but more bandwidth)
-
-```
-ZlibLevel=6      # Compression level 1-9 (higher = more CPU, less bandwidth)
+```ini
+ZlibLevel=6    # Compression level 1-9 (higher = more CPU, less bandwidth)
 ```
 
-**3. Reduce Frame Rate**
-```bash
-x0vncserver ... -DeferUpdate 50  # Milliseconds between updates
-```
+### Client-Side (Remmina)
 
-### Client-Side Optimization
-
-**Remmina Settings:**
 - Color Depth: 256 colors (8 bpp) for slow connections
 - Quality: Poor or Medium
-- Enable compression: ✓
-- Disable wallpaper: ✓ (if supported)
-
----
-
-## Script Maintenance
-
-### Updating the Script
-
-1. **Backup current version:**
-```bash
-   cp ~/vnc-manager.sh ~/vnc-manager.sh.backup
-```
-
-2. **Edit script:**
-```bash
-   nano ~/vnc-manager.sh
-```
-
-3. **Test changes:**
-```bash
-   bash -n ~/vnc-manager.sh  # Check syntax
-   ~/vnc-manager.sh           # Run normally
-```
-
-### Version Control (Optional)
-
-Track changes with git:
-```bash
-cd ~
-git init vnc-scripts
-cd vnc-scripts
-cp ~/vnc-manager.sh .
-git add vnc-manager.sh
-git commit -m "Initial version"
-```
-
-After changes:
-```bash
-git diff vnc-manager.sh     # See changes
-git add vnc-manager.sh
-git commit -m "Description of changes"
-```
-
----
-
-## Uninstallation
-
-### Complete Removal
-
-**Using the script:**
-```bash
-~/vnc-manager.sh
-# Select option 13
-# Type: yes
-```
-
-**Manual removal:**
-```bash
-# Stop and disable service
-systemctl --user stop x0vncserver
-systemctl --user disable x0vncserver
-
-# Remove files
-rm -f ~/.config/systemd/user/x0vncserver.service
-rm -f ~/start-vnc.sh
-rm -rf ~/.vnc
-
-# Reload systemd
-systemctl --user daemon-reload
-
-# Disable lingering
-loginctl disable-linger $USER
-
-# Remove TigerVNC package (optional)
-sudo zypper remove tigervnc
-
-# Remove firewall rules (optional)
-sudo firewall-cmd --permanent --remove-port=5900/tcp
-sudo firewall-cmd --reload
-```
+- Enable compression: checked
+- Disable wallpaper display: checked (if available)
 
 ---
 
 ## Glossary
 
-**ANSI**: American National Standards Institute - defines escape codes for terminal colors
+**ANSI:** American National Standards Institute — defines escape codes for terminal colors
 
-**Bash**: Bourne Again Shell - the default shell on most Linux systems
+**Autostart:** KDE mechanism that launches applications after desktop login
 
-**Display**: In X11, a connection to an X server, usually numbered (:0, :1, etc.)
+**Bash:** Bourne Again Shell — the default shell on most Linux systems
 
-**Exit Code**: Number returned by a command (0 = success, non-zero = failure)
+**Desktop Entry (.desktop):** Standard XDG file format for launching applications
 
-**Firewalld**: Dynamic firewall management tool for Linux
+**Display:** In X11, a connection to an X server, numbered `:0`, `:1`, etc.
 
-**Heredoc**: Here Document - multi-line string in shell scripts
+**Exit Code:** Number returned by a command (0 = success, non-zero = failure)
 
-**Lingering**: Systemd feature allowing user services to run when not logged in
+**Firewalld:** Dynamic firewall management tool used on openSUSE and Fedora-based systems
 
-**PCI**: Peripheral Component Interconnect - internal computer bus
+**Heredoc:** Here Document — multi-line string embedded in a shell script using `<< EOF`
 
-**Port**: Network endpoint identified by number (5900 for VNC)
+**KDE Plasma:** The desktop environment used on this system
 
-**RFB**: Remote Framebuffer Protocol - protocol used by VNC
+**nohup:** "No hangup" — prevents a process from terminating when the controlling terminal closes
 
-**Shebang**: First line of script (`#!/bin/bash`) indicating interpreter
+**PCI:** Peripheral Component Interconnect — internal computer bus (used by `lspci` to list hardware)
 
-**Stderr**: Standard Error - file descriptor 2 for error messages
+**pgrep / pkill:** Process search and signal tools that match by process name
 
-**Stdin**: Standard Input - file descriptor 0 for input
+**Port:** Network endpoint identified by number (VNC uses 5900 by default)
 
-**Stdout**: Standard Output - file descriptor 1 for normal output
+**RFB:** Remote Framebuffer Protocol — the protocol VNC uses to transmit screen data
 
-**Systemd**: Init system and service manager for Linux
+**SDDM:** Simple Desktop Display Manager — the login screen manager on KDE systems
 
-**VNC**: Virtual Network Computing - remote desktop protocol
+**sed:** Stream EDitor — processes and transforms text, used here to edit `.desktop` files in-place
 
-**X11**: X Window System version 11 - display server protocol
+**SELinux:** Security-Enhanced Linux — mandatory access control system enforced at the kernel level
 
-**XAUTHORITY**: File containing authentication credentials for X11
+**Shebang:** First line of a script (`#!/bin/bash`) declaring which interpreter to use
 
-**Wayland**: Modern display server protocol (VNC doesn't work with this)
+**ss:** Socket Statistics — modern replacement for `netstat`
+
+**Stderr:** Standard Error (file descriptor 2) — used for diagnostic messages
+
+**Stdin:** Standard Input (file descriptor 0) — used for reading input
+
+**Stdout:** Standard Output (file descriptor 1) — used for normal output and return values
+
+**VNC:** Virtual Network Computing — remote desktop sharing protocol
+
+**X11:** X Window System version 11 — the display server protocol required by this script
+
+**XAUTHORITY:** File containing the magic cookie credentials for X11 display access
+
+**Wayland:** Modern display server protocol that replaces X11 (not compatible with x0vncserver)
+
+**XDG:** X Desktop Group — standards body defining `.desktop` file format and autostart behaviour
 
 ---
 
@@ -1361,31 +1268,47 @@ sudo firewall-cmd --reload
 - [TigerVNC Website](https://tigervnc.org/)
 - [TigerVNC GitHub](https://github.com/TigerVNC/tigervnc)
 - [RFB Protocol Specification](https://github.com/rfbproto/rfbproto)
-- [Systemd Documentation](https://www.freedesktop.org/wiki/Software/systemd/)
 - [Firewalld Documentation](https://firewalld.org/documentation/)
+- [XDG Autostart Specification](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html)
 
 ### Community Resources
 
 - [Arch Wiki - TigerVNC](https://wiki.archlinux.org/title/TigerVNC)
-- [Debian Wiki - VNC](https://wiki.debian.org/VNC)
 - [openSUSE VNC Documentation](https://doc.opensuse.org/)
+- [KDE Autostart Documentation](https://userbase.kde.org/System_Settings/Autostart)
 
 ### Learning Bash
 
 - [Bash Guide for Beginners](https://tldp.org/LDP/Bash-Beginners-Guide/html/)
 - [Advanced Bash-Scripting Guide](https://tldp.org/LDP/abs/html/)
-- [ShellCheck](https://www.shellcheck.net/) - Online bash syntax checker
+- [ShellCheck](https://www.shellcheck.net/) — Online bash syntax checker
 
 ---
 
 ## Changelog
 
-### Version 1.0 (Current)
+### Version 2.0 (Current)
+
+- **Replaced systemd user service with KDE Autostart** — resolves xauth/SELinux issues on openSUSE Tumbleweed with SDDM
+- **Removed** `~/start-vnc.sh` startup script (no longer needed)
+- **Removed** `loginctl enable-linger` (not needed with autostart approach)
+- **Removed** all `systemctl --user` commands
+- **Added** `create_autostart_entry()` — creates `~/.config/autostart/x0vncserver.desktop`
+- **Updated** `enable_service()` — edits `Hidden` and `X-KDE-Autostart-enabled` flags in-place using `sed`
+- **Updated** `disable_service()` — sets `Hidden=true` without deleting the file
+- **Updated** `start_service()` — uses `nohup` and `pgrep` instead of systemctl
+- **Updated** `stop_service()` — uses `pkill` instead of systemctl
+- **Updated** `show_service_status()` — uses `pgrep` and reads `.desktop` file state
+- **Updated** `show_logs()` — reads `/tmp/x0vncserver.log` and system journal
+- **Updated** `uninstall_vnc()` — removes autostart file instead of systemd service
+
+### Version 1.0
+
 - Initial release
 - Auto-detect and install TigerVNC
 - Graphics hardware detection
-- Dynamic XAUTHORITY handling
-- Systemd service setup
+- Dynamic XAUTHORITY handling (attempted)
+- Systemd user service setup
 - Firewall configuration
 - Complete uninstall option
 - Menu-driven interface
@@ -1394,96 +1317,12 @@ sudo firewall-cmd --reload
 
 ## Credits & License
 
-**Created by:** Community effort
-**Tested on:** openSUSE Tumbleweed with Intel 965Q graphics
+**Created by:** Mark  
+**Tested on:** openSUSE Tumbleweed, KDE Plasma, SDDM, SELinux enforcing  
 **License:** Free to use, modify, and distribute
 
-**Special thanks to:**
-- TigerVNC developers
-- openSUSE community
-- Everyone who contributed to testing and debugging
-
----
-
-## Support
-
-### Getting Help
-
-If you encounter issues:
-
-1. **Check the logs:**
-```bash
-   journalctl --user -u x0vncserver -n 100
-```
-
-2. **Verify service status:**
-```bash
-   systemctl --user status x0vncserver
-```
-
-3. **Check network connectivity:**
-```bash
-   netstat -tulpn | grep 5900
-```
-
-4. **Review this documentation** - most issues are covered in Troubleshooting section
-
-### Reporting Issues
-
-When asking for help, provide:
-- Your Linux distribution and version
-- Graphics hardware (`lspci | grep VGA`)
-- Error messages from logs
-- Output of `systemctl --user status x0vncserver`
-- Whether you're using X11 or Wayland (`echo $XDG_SESSION_TYPE`)
-
----
-
-## Quick Reference Card
-
-### Most Common Commands
-```bash
-# Start VNC Manager
-~/vnc-manager.sh
-
-# Quick Manual Start
-x0vncserver -display :0 -rfbport 5900 -PasswordFile ~/.vnc/passwd -localhost no
-
-# Check Status
-systemctl --user status x0vncserver
-
-# View Logs
-journalctl --user -u x0vncserver -f
-
-# Restart Service
-systemctl --user restart x0vncserver
-
-# Find Your IP
-hostname -I
-
-# Check if Port is Open
-netstat -tulpn | grep 5900
-```
-
-### Emergency Recovery
-```bash
-# Kill all VNC processes
-pkill -9 x0vncserver
-
-# Stop systemd socket that might be blocking port
-sudo systemctl stop xvnc.socket
-
-# Start fresh
-systemctl --user restart x0vncserver
-
-# If all else fails, run uninstall then full setup
-~/vnc-manager.sh  # Option 13, then Option 1
-```
+**Special thanks to:** TigerVNC developers and the openSUSE community
 
 ---
 
 **End of Documentation**
-
-This comprehensive guide covers everything you need to know about the VNC Setup Manager script, from basic concepts to advanced troubleshooting. Keep it handy for reference!</parameter>
-<parameter name="old_str"># Start x0vncserver manually
-x0vncserver -display :0 -rfbport 5900 -Passwor</parameter>
