@@ -1,8 +1,8 @@
 # VNC Setup Manager - Complete Guide & Documentation
 
-<div align ="center">
-<img src ="Menu1.png">
-</div>
+<p align ="center ">
+!<img src ="Menu1.png">
+</p>
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -690,9 +690,9 @@ chmod +x ~/vnc-manager.sh
 - Checking connection attempts
 
 
-<div align ="center">
-<img src ="Menu11.png">
-</div>
+<p align ="center ">
+!<img src ="Menu11.png">
+</p>
 
 
 #### 11) Show Connection Info
@@ -736,9 +736,9 @@ chmod +x ~/vnc-manager.sh
 
 ### Using Remmina (Recommended)
 
-<div align="center">
-<img src ="remmina.png">
-</div>
+<p align ="center ">
+!<img src ="remmina.png">
+</p>
 
 
 1. **Open Remmina**

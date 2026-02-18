@@ -2,6 +2,7 @@
 
 # VNC Server Setup and Manager for openSUSE Tumbleweed
 # Supports x0vncserver for sharing existing desktop
+# Uses KDE Autostart for reliable boot persistence (avoids SELinux/xauth issues)
 
 set -e
 
@@ -16,23 +17,14 @@ NC='\033[0m' # No Color
 VNC_PORT=5900
 VNC_DIR="$HOME/.vnc"
 VNC_PASSWD_FILE="$VNC_DIR/passwd"
-SERVICE_FILE="$HOME/.config/systemd/user/x0vncserver.service"
+AUTOSTART_DIR="$HOME/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/x0vncserver.desktop"
 START_SCRIPT="$HOME/start-vnc.sh"
 
 print_msg() {
     local color="$1"
     local msg="$2"
-    
-    
-    # What $1 and $2 are (exactly)
-	# Inside any shell function or script:
-	# $1 = first positional parameter
-	# $2 = second positional parameter
-	# They are populated automatically by the shell from how the function (or script) is called"
-    
-    # In this case  print_msg "$BLUE" called from detect_graphics
-    
-    
+
     # If stderr is a terminal, keep colours; otherwise strip them
     if [ -t 2 ]; then
         echo -e "${color}${msg}${NC}" >&2
@@ -89,22 +81,21 @@ detect_graphics() {
     echo "$vnc_options"
 }
 
-
 # Function to auto-install TigerVNC
 auto_install_tigervnc() {
     print_msg "$BLUE" "Checking for TigerVNC installation..."
-    
+
     if command -v x0vncserver &> /dev/null; then
         print_msg "$GREEN" "TigerVNC is already installed!"
         return 0
     fi
-    
+
     print_msg "$YELLOW" "TigerVNC is not installed."
     read -p "Would you like to install it now? (y/n): " install_choice
-    
+
     if [[ "$install_choice" =~ ^[Yy]$ ]]; then
         print_msg "$BLUE" "Installing TigerVNC..."
-        
+
         # Detect package manager
         if command -v zypper &> /dev/null; then
             sudo zypper install -y tigervnc
@@ -118,7 +109,7 @@ auto_install_tigervnc() {
             print_msg "$RED" "Could not detect package manager. Please install TigerVNC manually."
             exit 1
         fi
-        
+
         if [ $? -eq 0 ]; then
             print_msg "$GREEN" "TigerVNC installed successfully!"
         else
@@ -134,26 +125,26 @@ auto_install_tigervnc() {
 # Function to check dependencies
 check_dependencies() {
     print_msg "$BLUE" "Checking dependencies..."
-    
+
     # First check if TigerVNC is installed, if not offer to install
     auto_install_tigervnc
-    
-    local deps=("x0vncserver" "vncpasswd" "systemctl")
+
+    local deps=("x0vncserver" "vncpasswd")
     local missing=()
-    
+
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing+=("$dep")
         fi
     done
-    
+
     if [ ${#missing[@]} -gt 0 ]; then
         print_msg "$RED" "Missing dependencies: ${missing[*]}"
         print_msg "$YELLOW" "This should not happen after TigerVNC installation."
         print_msg "$YELLOW" "Please check your installation."
         exit 1
     fi
-    
+
     print_msg "$GREEN" "All dependencies satisfied!"
 }
 
@@ -175,9 +166,9 @@ set_vnc_password() {
     echo ""
     print_msg "$YELLOW" "You will be prompted to enter a VNC password (6-8 characters recommended)"
     echo ""
-    
+
     vncpasswd "$VNC_PASSWD_FILE"
-    
+
     if [ $? -eq 0 ]; then
         chmod 600 "$VNC_PASSWD_FILE"
         print_msg "$GREEN" "VNC password set successfully!"
@@ -190,7 +181,7 @@ set_vnc_password() {
 # Function to create VNC config file
 create_vnc_config() {
     print_msg "$BLUE" "Creating VNC configuration file..."
-    
+
     cat > "$VNC_DIR/config" << 'EOF'
 # VNC Server Configuration
 securitytypes=vncauth
@@ -198,89 +189,52 @@ geometry=1920x1080
 localhost=no
 alwaysshared
 EOF
-    
+
     chmod 644 "$VNC_DIR/config"
     print_msg "$GREEN" "VNC config created: $VNC_DIR/config"
 }
 
+# Function to create KDE autostart entry
+# Uses ~/.config/autostart which KDE/SDDM honours at login.
+# This approach avoids xauth/SELinux issues because x0vncserver
+# launches inside the fully authenticated graphical session.
+create_autostart_entry() {
+    print_msg "$BLUE" "Creating KDE autostart entry..."
 
+    mkdir -p "$AUTOSTART_DIR"
 
-# Function to create startup script
-create_startup_script() {
-    print_msg "$BLUE" "Creating VNC startup script..."
-    
-    # Detect graphics hardware and get optimized options
-    local vnc_opts=$(detect_graphics)
-    
-    # Create the start-vnc.sh script without any color codes
-    cat > "$START_SCRIPT" << 'OUTER_EOF'
-#!/bin/bash
-
-# Get current XAUTHORITY (it changes on each login)
-if [ -z "$XAUTHORITY" ]; then
-    export XAUTHORITY="$HOME/.Xauthority"
-fi
-
-# Start x0vncserver with hardware-optimized settings
-x0vncserver -display :0 \
-    -rfbport 5900 \
-    -PasswordFile "$HOME/.vnc/passwd" \
-    -localhost no \
-    -AlwaysShared \
-    2>&1 | logger -t x0vncserver
-OUTER_EOF
-    
-    # Now replace the placeholder with actual vnc_opts
-    sed -i "s/-AlwaysShared/$vnc_opts/" "$START_SCRIPT"
-    
-    chmod +x "$START_SCRIPT"
-    print_msg "$GREEN" "Startup script created: $START_SCRIPT"
-    print_msg "$BLUE" "Configured with optimized settings for your graphics hardware"
-    
-    cat "$START_SCRIPT"
-}
-
-# Function to create systemd service
-create_systemd_service() {
-    print_msg "$BLUE" "Creating systemd user service..."
-    
-    # Create systemd user directory if it doesn't exist
-    mkdir -p "$(dirname "$SERVICE_FILE")"
-    
-    cat > "$SERVICE_FILE" << EOF
-[Unit]
-Description=x0vncserver - VNC Server for X Display
-After=graphical.target
-
-[Service]
-Type=simple
-ExecStart=/bin/bash -c 'export DISPLAY=:0; if [ -n "\$XAUTHORITY" ]; then export XAUTHORITY="\$XAUTHORITY"; fi; $START_SCRIPT'
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
+    cat > "$AUTOSTART_FILE" << EOF
+[Desktop Entry]
+Type=Application
+Name=x0vncserver
+Comment=VNC Server for X Display
+Exec=x0vncserver -display :0 -rfbport 5900 -PasswordFile $VNC_PASSWD_FILE -localhost no -AlwaysShared
+Hidden=false
+NoDisplay=false
+X-KDE-Autostart-enabled=true
 EOF
-    
-    print_msg "$GREEN" "Systemd service created: $SERVICE_FILE"
+
+    chmod 644 "$AUTOSTART_FILE"
+    print_msg "$GREEN" "Autostart entry created: $AUTOSTART_FILE"
+    print_msg "$YELLOW" "x0vncserver will start automatically at next login"
 }
 
 # Function to configure firewall
 configure_firewall() {
     print_msg "$BLUE" "Configuring firewall..."
-    
+
     # Check if firewalld is running
     if ! systemctl is-active --quiet firewalld; then
         print_msg "$YELLOW" "Firewalld is not running, skipping firewall configuration"
         return 0
     fi
-    
+
     print_msg "$YELLOW" "This requires sudo privileges..."
-    
+
     # Add VNC port
     sudo firewall-cmd --permanent --add-port=5900/tcp &> /dev/null
     sudo firewall-cmd --reload &> /dev/null
-    
+
     if [ $? -eq 0 ]; then
         print_msg "$GREEN" "Firewall configured: Port 5900 opened"
     else
@@ -288,217 +242,106 @@ configure_firewall() {
     fi
 }
 
-# Function to start VNC service
+# Function to start VNC (directly, for current session)
 start_service() {
-    print_msg "$BLUE" "Starting VNC service..."
-    
-    # Reload systemd to pick up any changes
-    systemctl --user daemon-reload
-    
-    systemctl --user start x0vncserver.service
-    
-    if [ $? -eq 0 ]; then
-        print_msg "$GREEN" "VNC service started successfully!"
-        sleep 2
-        show_service_status
+    print_msg "$BLUE" "Starting VNC server..."
+
+    # Kill any existing instance first
+    pkill -x x0vncserver 2>/dev/null || true
+    sleep 1
+
+    # Launch in background, logging to syslog
+    nohup x0vncserver -display :0 \
+        -rfbport 5900 \
+        -PasswordFile "$VNC_PASSWD_FILE" \
+        -localhost no \
+        -AlwaysShared \
+        > /tmp/x0vncserver.log 2>&1 &
+
+    sleep 2
+
+    if pgrep -x x0vncserver > /dev/null; then
+        print_msg "$GREEN" "VNC server started successfully! (PID: $(pgrep -x x0vncserver))"
     else
-        print_msg "$RED" "Failed to start VNC service"
-        print_msg "$YELLOW" "Check logs with: journalctl --user -u x0vncserver.service"
+        print_msg "$RED" "Failed to start VNC server"
+        print_msg "$YELLOW" "Check logs with option 10 or: cat /tmp/x0vncserver.log"
     fi
 }
 
-# Function to stop VNC service
+# Function to stop VNC
 stop_service() {
-    print_msg "$BLUE" "Stopping VNC service..."
-    
-    systemctl --user stop x0vncserver.service
-    
-    if [ $? -eq 0 ]; then
-        print_msg "$GREEN" "VNC service stopped"
+    print_msg "$BLUE" "Stopping VNC server..."
+
+    if pkill -x x0vncserver 2>/dev/null; then
+        print_msg "$GREEN" "VNC server stopped"
     else
-        print_msg "$RED" "Failed to stop VNC service"
+        print_msg "$YELLOW" "VNC server was not running"
     fi
 }
 
-# Function to restart VNC service
+# Function to restart VNC
 restart_service() {
-    print_msg "$BLUE" "Restarting VNC service..."
-    
-    # Reload systemd to pick up any changes
-    systemctl --user daemon-reload
-    
-    systemctl --user restart x0vncserver.service
-    
-    if [ $? -eq 0 ]; then
-        print_msg "$GREEN" "VNC service restarted successfully!"
-        sleep 2
-        show_service_status
-    else
-        print_msg "$RED" "Failed to restart VNC service"
-    fi
+    print_msg "$BLUE" "Restarting VNC server..."
+    stop_service
+    sleep 1
+    start_service
 }
 
-# Function to enable VNC service
+# Function to enable VNC autostart
 enable_service() {
-    print_msg "$BLUE" "Enabling VNC service (auto-start on login)..."
-    
-    # Enable lingering for the user (allows service to run without active session)
-    print_msg "$BLUE" "Enabling user lingering..."
-    loginctl enable-linger "$USER"
-    
-    systemctl --user enable x0vncserver.service
-    
-    if [ $? -eq 0 ]; then
-        print_msg "$GREEN" "VNC service enabled (will start automatically on login)"
+    print_msg "$BLUE" "Enabling VNC autostart on login..."
+
+    if [ ! -f "$AUTOSTART_FILE" ]; then
+        create_autostart_entry
     else
-        print_msg "$RED" "Failed to enable VNC service"
+        # Set Hidden=false to re-enable
+        sed -i 's/^Hidden=.*/Hidden=false/' "$AUTOSTART_FILE"
+        sed -i 's/^X-KDE-Autostart-enabled=.*/X-KDE-Autostart-enabled=true/' "$AUTOSTART_FILE"
+        print_msg "$GREEN" "VNC autostart enabled (will start automatically at next login)"
     fi
 }
 
-# Function to disable VNC service
+# Function to disable VNC autostart
 disable_service() {
-    print_msg "$BLUE" "Disabling VNC service..."
-    
-    systemctl --user disable x0vncserver.service
-    
-    if [ $? -eq 0 ]; then
-        print_msg "$GREEN" "VNC service disabled (will not start automatically)"
+    print_msg "$BLUE" "Disabling VNC autostart..."
+
+    if [ -f "$AUTOSTART_FILE" ]; then
+        sed -i 's/^Hidden=.*/Hidden=true/' "$AUTOSTART_FILE"
+        sed -i 's/^X-KDE-Autostart-enabled=.*/X-KDE-Autostart-enabled=false/' "$AUTOSTART_FILE"
+        print_msg "$GREEN" "VNC autostart disabled (will not start at next login)"
     else
-        print_msg "$RED" "Failed to disable VNC service"
+        print_msg "$YELLOW" "No autostart entry found - nothing to disable"
     fi
 }
 
-# Function to show system information
-show_system_info() {
-    echo ""
-    print_msg "$GREEN" "═════════════════════════"
-    print_msg "$GREEN" "System Information"
-    print_msg "$GREEN" "═════════════════════════"
-    echo ""
-    
-    # Hostname
-    print_msg "$BLUE" "Hostname: $(hostname)"
-    
-    # IP Address
-    ip_addr=$(hostname -I | awk '{print $1}')
-    print_msg "$BLUE" "IP Address: $ip_addr"
-    
-    # Graphics Hardware
-    print_msg "$BLUE" "Graphics Hardware:"
-    lspci | grep -i vga | sed 's/^/  /'
-    
-    # OpenGL Renderer (if available)
-    if command -v glxinfo &> /dev/null; then
-        gl_renderer=$(glxinfo 2>/dev/null | grep "OpenGL renderer" | cut -d: -f2 | xargs)
-        if [ -n "$gl_renderer" ]; then
-            print_msg "$BLUE" "OpenGL Renderer: $gl_renderer"
-        fi
-    fi
-    
-    # Display Server
-    if [ -n "$WAYLAND_DISPLAY" ]; then
-        print_msg "$YELLOW" "Display Server: Wayland (Note: VNC requires X11)"
-    else
-        print_msg "$GREEN" "Display Server: X11 (Compatible with VNC)"
-    fi
-    
-    # Desktop Environment
-    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
-        print_msg "$BLUE" "Desktop Environment: $XDG_CURRENT_DESKTOP"
-    fi
-    
-    echo ""
-    print_msg "$GREEN" "═════════════════════════"
-    echo ""
-}
-
-# Function to uninstall VNC
-uninstall_vnc() {
-    echo ""
-    print_msg "$RED" "═════════════════════════"
-    print_msg "$RED" "COMPLETE UNINSTALL"
-    print_msg "$RED" "═════════════════════════"
-    echo ""
-    print_msg "$YELLOW" "This will remove all VNC configuration and services."
-    print_msg "$YELLOW" "The TigerVNC package will NOT be removed."
-    echo ""
-    read -p "Are you sure you want to continue? (yes/no): " confirm
-    
-    if [[ ! "$confirm" =~ ^[Yy][Ee][Ss]$ ]]; then
-        print_msg "$GREEN" "Uninstall cancelled."
-        return
-    fi
-    
-    echo ""
-    print_msg "$BLUE" "Starting uninstallation..."
-    echo ""
-    
-    # Stop and disable service
-    print_msg "$BLUE" "Stopping and disabling VNC service..."
-    systemctl --user stop x0vncserver.service 2>/dev/null || true
-    systemctl --user disable x0vncserver.service 2>/dev/null || true
-    
-    # Kill any running VNC processes
-    print_msg "$BLUE" "Killing any running VNC processes..."
-    pkill -9 x0vncserver 2>/dev/null || true
-    pkill -9 Xvnc 2>/dev/null || true
-    
-    # Remove systemd service file
-    if [ -f "$SERVICE_FILE" ]; then
-        print_msg "$BLUE" "Removing systemd service file..."
-        rm -f "$SERVICE_FILE"
-        print_msg "$GREEN" "✓ Removed: $SERVICE_FILE"
-    fi
-    
-    # Reload systemd
-    systemctl --user daemon-reload 2>/dev/null || true
-    
-    # Remove startup script
-    if [ -f "$START_SCRIPT" ]; then
-        print_msg "$BLUE" "Removing startup script..."
-        rm -f "$START_SCRIPT"
-        print_msg "$GREEN" "✓ Removed: $START_SCRIPT"
-    fi
-    
-    # Remove VNC directory
-    if [ -d "$VNC_DIR" ]; then
-        print_msg "$BLUE" "Removing VNC directory..."
-        rm -rf "$VNC_DIR"
-        print_msg "$GREEN" "✓ Removed: $VNC_DIR"
-    fi
-    
-    # Disable lingering
-    print_msg "$BLUE" "Disabling user lingering..."
-    loginctl disable-linger "$USER" 2>/dev/null || true
-    
-    echo ""
-    print_msg "$GREEN" "═════════════════════════"
-    print_msg "$GREEN" "VNC Uninstallation Complete!"
-    print_msg "$GREEN" "═════════════════════════"
-    echo ""
-    print_msg "$YELLOW" "Optional cleanup:"
-    echo ""
-    echo "To remove TigerVNC package:"
-    echo "  sudo zypper remove tigervnc"
-    echo ""
-    echo "To remove firewall rules:"
-    echo "  sudo firewall-cmd --permanent --remove-port=5900/tcp"
-    echo "  sudo firewall-cmd --permanent --remove-port=5900-5910/tcp"
-    echo "  sudo firewall-cmd --reload"
-    echo ""
-    print_msg "$GREEN" "You can now run Full Setup (Option 1) for a clean install."
-    echo ""
-}
-
-# Function to show service status
+# Function to show VNC status
 show_service_status() {
-    print_msg "$BLUE" "VNC Service Status:"
+    print_msg "$BLUE" "VNC Server Status:"
     echo ""
-    systemctl --user status x0vncserver.service --no-pager
+
+    if pgrep -x x0vncserver > /dev/null; then
+        local pid
+        pid=$(pgrep -x x0vncserver)
+        print_msg "$GREEN" "✓ x0vncserver is RUNNING (PID: $pid)"
+    else
+        print_msg "$RED" "✗ x0vncserver is NOT running"
+    fi
+
     echo ""
-    
+    print_msg "$BLUE" "Autostart Status:"
+    if [ -f "$AUTOSTART_FILE" ]; then
+        if grep -q "Hidden=true" "$AUTOSTART_FILE"; then
+            print_msg "$YELLOW" "Autostart is DISABLED"
+        else
+            print_msg "$GREEN" "Autostart is ENABLED (will start at login)"
+        fi
+    else
+        print_msg "$YELLOW" "No autostart entry found"
+    fi
+
+    echo ""
     print_msg "$BLUE" "Network Status:"
-    if netstat -tulpn 2>/dev/null | grep -q ":5900"; then
+    if ss -tulpn 2>/dev/null | grep -q ":5900"; then
         print_msg "$GREEN" "VNC server is listening on port 5900"
     else
         print_msg "$YELLOW" "VNC server is not listening on port 5900"
@@ -507,15 +350,26 @@ show_service_status() {
 
 # Function to show logs
 show_logs() {
-    print_msg "$BLUE" "VNC Service Logs (last 50 lines):"
+    print_msg "$BLUE" "VNC Server Logs:"
     echo ""
-    journalctl --user -u x0vncserver.service -n 50 --no-pager
+
+    if [ -f /tmp/x0vncserver.log ]; then
+        print_msg "$BLUE" "--- /tmp/x0vncserver.log ---"
+        tail -50 /tmp/x0vncserver.log
+    else
+        print_msg "$YELLOW" "No log file found at /tmp/x0vncserver.log"
+    fi
+
+    echo ""
+    print_msg "$BLUE" "--- System log entries ---"
+    journalctl --since "1 hour ago" 2>/dev/null | grep -i "x0vncserver" | tail -20 || \
+        print_msg "$YELLOW" "No system log entries found"
 }
 
 # Function to show connection info
 show_connection_info() {
     ip_addr=$(hostname -I | awk '{print $1}')
-    
+
     echo ""
     print_msg "$GREEN" "═════════════════════════"
     print_msg "$GREEN" "VNC Connection Information"
@@ -533,24 +387,27 @@ show_connection_info() {
     echo ""
     print_msg "$GREEN" "═════════════════════════"
     echo ""
+}
 
+# Function to show system information
+show_system_info() {
     echo ""
     print_msg "$GREEN" "═════════════════════════"
     print_msg "$GREEN" "System Information"
     print_msg "$GREEN" "═════════════════════════"
     echo ""
-    
+
     # Hostname
     print_msg "$BLUE" "Hostname: $(hostname)"
-    
+
     # IP Address
     ip_addr=$(hostname -I | awk '{print $1}')
     print_msg "$BLUE" "IP Address: $ip_addr"
-    
+
     # Graphics Hardware
     print_msg "$BLUE" "Graphics Hardware:"
     lspci | grep -i vga | sed 's/^/  /'
-    
+
     # OpenGL Renderer (if available)
     if command -v glxinfo &> /dev/null; then
         gl_renderer=$(glxinfo 2>/dev/null | grep "OpenGL renderer" | cut -d: -f2 | xargs)
@@ -558,26 +415,90 @@ show_connection_info() {
             print_msg "$BLUE" "OpenGL Renderer: $gl_renderer"
         fi
     fi
-    
+
     # Display Server
     if [ -n "$WAYLAND_DISPLAY" ]; then
         print_msg "$YELLOW" "Display Server: Wayland (Note: VNC requires X11)"
     else
         print_msg "$GREEN" "Display Server: X11 (Compatible with VNC)"
     fi
-    
+
     # Desktop Environment
     if [ -n "$XDG_CURRENT_DESKTOP" ]; then
         print_msg "$BLUE" "Desktop Environment: $XDG_CURRENT_DESKTOP"
     fi
-    
+
     echo ""
     print_msg "$GREEN" "═════════════════════════"
     echo ""
+}
 
-    ip_addr=$(hostname -I | awk '{print $1}')
-    
-    
+# Function to uninstall VNC
+uninstall_vnc() {
+    echo ""
+    print_msg "$RED" "═════════════════════════"
+    print_msg "$RED" "COMPLETE UNINSTALL"
+    print_msg "$RED" "═════════════════════════"
+    echo ""
+    print_msg "$YELLOW" "This will remove all VNC configuration and autostart entries."
+    print_msg "$YELLOW" "The TigerVNC package will NOT be removed."
+    echo ""
+    read -p "Are you sure you want to continue? (yes/no): " confirm
+
+    if [[ ! "$confirm" =~ ^[Yy][Ee][Ss]$ ]]; then
+        print_msg "$GREEN" "Uninstall cancelled."
+        return
+    fi
+
+    echo ""
+    print_msg "$BLUE" "Starting uninstallation..."
+    echo ""
+
+    # Stop any running VNC processes
+    print_msg "$BLUE" "Stopping any running VNC processes..."
+    pkill -x x0vncserver 2>/dev/null && print_msg "$GREEN" "✓ VNC server stopped" || true
+    pkill -9 Xvnc 2>/dev/null || true
+
+    # Remove autostart entry
+    if [ -f "$AUTOSTART_FILE" ]; then
+        print_msg "$BLUE" "Removing autostart entry..."
+        rm -f "$AUTOSTART_FILE"
+        print_msg "$GREEN" "✓ Removed: $AUTOSTART_FILE"
+    fi
+
+    # Remove startup script
+    if [ -f "$START_SCRIPT" ]; then
+        print_msg "$BLUE" "Removing startup script..."
+        rm -f "$START_SCRIPT"
+        print_msg "$GREEN" "✓ Removed: $START_SCRIPT"
+    fi
+
+    # Remove VNC directory
+    if [ -d "$VNC_DIR" ]; then
+        print_msg "$BLUE" "Removing VNC directory..."
+        rm -rf "$VNC_DIR"
+        print_msg "$GREEN" "✓ Removed: $VNC_DIR"
+    fi
+
+    # Remove log file
+    rm -f /tmp/x0vncserver.log 2>/dev/null || true
+
+    echo ""
+    print_msg "$GREEN" "═════════════════════════"
+    print_msg "$GREEN" "VNC Uninstallation Complete!"
+    print_msg "$GREEN" "═════════════════════════"
+    echo ""
+    print_msg "$YELLOW" "Optional cleanup:"
+    echo ""
+    echo "To remove TigerVNC package:"
+    echo "  sudo zypper remove tigervnc"
+    echo ""
+    echo "To remove firewall rules:"
+    echo "  sudo firewall-cmd --permanent --remove-port=5900/tcp"
+    echo "  sudo firewall-cmd --reload"
+    echo ""
+    print_msg "$GREEN" "You can now run Full Setup (Option 1) for a clean install."
+    echo ""
 }
 
 # Function to perform full setup
@@ -586,22 +507,23 @@ full_setup() {
     print_msg "$GREEN" "Starting Full VNC Setup"
     print_msg "$GREEN" "═════════════════════════"
     echo ""
-    
+
     check_dependencies
     create_vnc_dir
     set_vnc_password
     create_vnc_config
-    create_startup_script
-    create_systemd_service
+    create_autostart_entry
     configure_firewall
-    enable_service
     start_service
-    
+
     echo ""
     print_msg "$GREEN" "═════════════════════════"
     print_msg "$GREEN" "VNC Setup Complete!"
     print_msg "$GREEN" "═════════════════════════"
-    
+    echo ""
+    print_msg "$YELLOW" "NOTE: VNC is running now and will auto-start at every login via KDE autostart."
+    echo ""
+
     show_connection_info
 }
 
@@ -620,18 +542,18 @@ show_menu() {
     echo "    3) Configure Firewall"
     echo ""
     echo "  Service Management:"
-    echo "    4) Start VNC Service"
-    echo "    5) Stop VNC Service"
-    echo "    6) Restart VNC Service"
-    echo "    7) Enable VNC Service (Auto-start)"
-    echo "    8) Disable VNC Service"
+    echo "    4) Start VNC Server"
+    echo "    5) Stop VNC Server"
+    echo "    6) Restart VNC Server"
+    echo "    7) Enable Autostart (start at login)"
+    echo "    8) Disable Autostart"
     echo ""
     echo "  Uninstall:"
     echo "   13) Complete Uninstall (Clean Removal)"
     echo ""
     echo "  Information & Troubleshooting:"
-    echo "    9) Show Service Status"
-    echo "   10) Show Service Logs"
+    echo "    9) Show VNC Status"
+    echo "   10) Show Logs"
     echo "   11) Show Connection Info"
     echo "   12) Show System Information"
     echo ""
@@ -644,12 +566,12 @@ show_menu() {
 # Main program loop
 main() {
     check_root
-    
+
     while true; do
         show_menu
         read -p "Select an option: " choice
         echo ""
-        
+
         case $choice in
             1)
                 full_setup
